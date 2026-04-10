@@ -8,14 +8,14 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var isLoggedIn = false
+    @EnvironmentObject private var session: AppSession
 
     var body: some View {
         Group {
-            if isLoggedIn {
+            if session.isAuthenticated {
                 MainTabContainerView()
             } else {
-                OnboardingFlowView(isLoggedIn: $isLoggedIn)
+                OnboardingFlowView(isLoggedIn: $session.isAuthenticated)
             }
         }
     }

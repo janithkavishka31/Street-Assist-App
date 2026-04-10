@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MainTabContainerView: View {
     @State private var selectedTab: StreetAssistTab = .home
-    @StateObject private var session = AppSession()
+    @EnvironmentObject private var session: AppSession
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,12 +18,11 @@ struct MainTabContainerView: View {
                     case .rankings:
                         RankingsView(onBack: { selectedTab = .home })
                     case .profile:
-                        PlaceholderTabView(title: "Profile")
+                        ProfileView()
                     }
                 }
                 .toolbar(.hidden, for: .navigationBar)
             }
-            .environmentObject(session)
 
             StreetAssistBottomTabBar(selected: $selectedTab)
         }
@@ -52,4 +51,5 @@ private struct PlaceholderTabView: View {
 
 #Preview {
     MainTabContainerView()
+        .environmentObject(AppSession())
 }

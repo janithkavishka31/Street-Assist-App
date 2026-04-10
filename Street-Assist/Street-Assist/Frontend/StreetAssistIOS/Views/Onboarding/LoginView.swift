@@ -6,6 +6,10 @@ struct LoginView: View {
 
     @State private var emailOrPhone: String = ""
     @State private var password: String = ""
+    @State private var isSubmitting: Bool = false
+    @State private var errorMessage: String?
+
+    private let authService = SupabaseAuthService()
 
     var body: some View {
         ZStack {
@@ -34,6 +38,13 @@ struct LoginView: View {
                 }
                 .padding(.top, 10)
 
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .padding(.top, 2)
+                }
+
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Password")
@@ -60,7 +71,23 @@ struct LoginView: View {
                 }
 
                 Button {
-                    onLogin()
+                    isSubmitting = true
+                    errorMessage = nil
+
+                    Task {
+                        do {
+                            try await authService.signInEmail(email: emailOrPhone, password: password)
+                            await MainActor.run {
+                                isSubmitting = false
+                                onLogin()
+                            }
+                        } catch {
+                            await MainActor.run {
+                                isSubmitting = false
+                                errorMessage = error.localizedDescription
+                            }
+                        }
+                    }
                 } label: {
                     Text("Login")
                         .font(.system(size: 18, weight: .bold))
@@ -78,6 +105,8 @@ struct LoginView: View {
                         .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 12)
                 }
                 .buttonStyle(.plain)
+                    .disabled(isSubmitting)
+                    .opacity(isSubmitting ? 0.7 : 1)
                 .padding(.top, 8)
 
                 connectWithDivider

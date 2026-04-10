@@ -12,6 +12,15 @@ struct SignUpView: View {
         case roadside
         case errands
 
+        var dbKey: String {
+            switch self {
+            case .technical: return "technical"
+            case .physical: return "physical"
+            case .roadside: return "roadside"
+            case .errands: return "errands"
+            }
+        }
+
         var title: String {
             switch self {
             case .technical: return "Technical"
@@ -57,6 +66,12 @@ struct SignUpView: View {
     @State private var quickBio: String = ""
     @State private var selectedSkills: Set<Skill> = []
 
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+    @State private var infoMessage: String?
+
+    private let authService = SupabaseAuthService()
+
     var body: some View {
         ZStack {
             AppTheme.screenBackground
@@ -73,6 +88,16 @@ struct SignUpView: View {
                             .font(.system(size: 40, weight: .bold))
                             .foregroundStyle(AppTheme.textPrimary)
                             .padding(.top, 18)
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.red.opacity(0.85))
+                        } else if let infoMessage {
+                            Text(infoMessage)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
 
                         modeToggle
 
@@ -130,7 +155,7 @@ struct SignUpView: View {
             togglePill(title: "I need help", isSelected: mode == .needHelp) {
                 mode = .needHelp
             }
-            togglePill(title: "I want to help", isSelected: mode == .wantToHelp) {
+            togglePill(title: "I want to help", isSelected: mode == .wantToHelp, isEnabled: isNeedHelpComplete) {
                 mode = .wantToHelp
             }
         }
@@ -139,7 +164,7 @@ struct SignUpView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func togglePill(title: String, isSelected: Bool, onTap: @escaping () -> Void) -> some View {
+    private func togglePill(title: String, isSelected: Bool, isEnabled: Bool = true, onTap: @escaping () -> Void) -> some View {
         Button(action: onTap) {
             Text(title)
                 .font(.system(size: 16, weight: .bold))
@@ -150,6 +175,16 @@ struct SignUpView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.55)
+    }
+
+    private var isNeedHelpComplete: Bool {
+        let nameOk = !fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let emailOk = !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let phoneOk = !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let passwordOk = !password.isEmpty
+        return nameOk && emailOk && phoneOk && passwordOk && agreedToTerms
     }
 
     private var needHelpForm: some View {
@@ -249,7 +284,15 @@ struct SignUpView: View {
             .padding(.top, 6)
 
             Button {
-                // wired later
+                guard isNeedHelpComplete else {
+                    errorMessage = "Please complete all fields and agree to the terms to continue."
+                    infoMessage = nil
+                    return
+                }
+
+                errorMessage = nil
+                infoMessage = nil
+                mode = .wantToHelp
             } label: {
                 HStack {
                     Spacer()
@@ -348,7 +391,7 @@ struct SignUpView: View {
             }
 
             Button {
-                onCreateAccount()
+                Task { await submitSignUp(includeHelperInfo: true) }
             } label: {
                 Text("Complete & Create Account")
                     .font(.system(size: 18, weight: .bold))
@@ -367,9 +410,11 @@ struct SignUpView: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 6)
+            .disabled(isSubmitting)
+            .opacity(isSubmitting ? 0.7 : 1)
 
             Button {
-                onCreateAccount()
+                Task { await submitSignUp(includeHelperInfo: false) }
             } label: {
                 Text("Skip & Create Account")
                     .font(.system(size: 18, weight: .bold))
@@ -380,7 +425,50 @@ struct SignUpView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(isSubmitting)
+            .opacity(isSubmitting ? 0.7 : 1)
         }
+    }
+
+    @MainActor
+    private func submitSignUp(includeHelperInfo: Bool) async {
+        guard !isSubmitting else { return }
+
+        guard isNeedHelpComplete else {
+            errorMessage = "Please complete the required signup details first."
+            infoMessage = nil
+            mode = .needHelp
+            return
+        }
+
+        isSubmitting = true
+        errorMessage = nil
+        infoMessage = nil
+
+        let bio = includeHelperInfo ? quickBio : nil
+        let skills = includeHelperInfo ? selectedSkills.map { $0.dbKey } : nil
+
+        do {
+            let didCreateSession = try await authService.signUpEmail(
+                fullName: fullName,
+                email: email,
+                phone: phone,
+                password: password,
+                agreedToTerms: agreedToTerms,
+                quickBio: bio,
+                skills: skills
+            )
+
+            if didCreateSession {
+                onCreateAccount()
+            } else {
+                infoMessage = "Account created. Please confirm your email, then login."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isSubmitting = false
     }
 
     private func labeledField(title: String, icon: String, placeholder: String, text: Binding<String>) -> some View {

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		71A1C0D02F90000100A49055 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 71A1C0CF2F90000100A49055 /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		71910DFC2F88B9BF00A49055 /* Street-Assist.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Street-Assist.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				71A1C0D02F90000100A49055 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = "Street-Assist";
 			packageProductDependencies = (
+				71A1C0CF2F90000100A49055 /* Supabase */,
 			);
 			productName = "Street-Assist";
 			productReference = 71910DFC2F88B9BF00A49055 /* Street-Assist.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 71910DF32F88B9BF00A49055;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				71910FB12F892E1F00A49055 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 71910DFD2F88B9BF00A49055 /* Products */;
 			projectDirPath = "";
@@ -347,6 +356,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		71910FB12F892E1F00A49055 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		71A1C0CF2F90000100A49055 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 71910FB12F892E1F00A49055 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 71910DF42F88B9BF00A49055 /* Project object */;
 }
