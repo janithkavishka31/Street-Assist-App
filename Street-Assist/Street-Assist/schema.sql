@@ -366,16 +366,10 @@ create policy "help_zones_insert" on public.help_zones
 create policy "help_zones_update_creator" on public.help_zones
   for update using (auth.uid() = created_by_user_id);
 
--- zone_memberships: members can read their zone's memberships
+-- zone_memberships: members can read their own membership rows
 create policy "zone_memberships_read" on public.zone_memberships
   for select using (
-    auth.uid() = user_id or
-    exists (
-      select 1 from public.zone_memberships zm
-      where zm.zone_id = zone_memberships.zone_id
-        and zm.user_id = auth.uid()
-        and zm.status = 'active'
-    )
+    auth.uid() = user_id
   );
 
 create policy "zone_memberships_insert_self" on public.zone_memberships

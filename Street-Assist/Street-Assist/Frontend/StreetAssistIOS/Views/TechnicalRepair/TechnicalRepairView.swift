@@ -4,7 +4,6 @@ struct TechnicalRepairView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isShowingNewRequest = false
-    @State private var newRequestServiceTitle: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,7 +43,7 @@ struct TechnicalRepairView: View {
         .background(AppTheme.screenBackground)
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $isShowingNewRequest) {
-            NewRequestView(serviceTitle: newRequestServiceTitle)
+            NewRequestView(category: .technicalAndRepair)
         }
     }
 
@@ -99,7 +98,6 @@ struct TechnicalRepairView: View {
                     .foregroundStyle(.white.opacity(0.95))
 
                 Button {
-                    newRequestServiceTitle = "Emergency Tech Help"
                     isShowingNewRequest = true
                 } label: {
                     Text("Book Now")
@@ -128,7 +126,6 @@ struct TechnicalRepairView: View {
                 title: "Bike Repair",
                 subtitle: "Maintenance, flats & tuning",
                 onTap: {
-                    newRequestServiceTitle = "Bike Repair"
                     isShowingNewRequest = true
                 }
             )
@@ -140,7 +137,6 @@ struct TechnicalRepairView: View {
                 title: "Car Repair",
                 subtitle: "Diagnostics & minor fixes",
                 onTap: {
-                    newRequestServiceTitle = "Car Repair"
                     isShowingNewRequest = true
                 }
             )
@@ -152,7 +148,6 @@ struct TechnicalRepairView: View {
                 title: "Electrical",
                 subtitle: "Wiring, lighting & outlets",
                 onTap: {
-                    newRequestServiceTitle = "Electrical"
                     isShowingNewRequest = true
                 }
             )
@@ -164,7 +159,6 @@ struct TechnicalRepairView: View {
                 title: "Hardware",
                 subtitle: "Locks, doors & installations",
                 onTap: {
-                    newRequestServiceTitle = "Hardware"
                     isShowingNewRequest = true
                 }
             )
@@ -177,7 +171,6 @@ struct TechnicalRepairView: View {
                 subtitle: "Setup, troubleshooting & data",
                 iconUsesFilledCircle: true,
                 onTap: {
-                    newRequestServiceTitle = "Digital/Tech Help"
                     isShowingNewRequest = true
                 }
             )

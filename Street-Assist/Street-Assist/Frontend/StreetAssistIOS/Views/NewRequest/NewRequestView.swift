@@ -3,7 +3,7 @@ import PhotosUI
 import SwiftUI
 
 struct NewRequestView: View {
-    let serviceTitle: String
+    let category: HelpCategory
 
     @Environment(\.dismiss) private var dismiss
 
@@ -16,6 +16,10 @@ struct NewRequestView: View {
         center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
         span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
     )
+
+    @State private var isSubmitting = false
+    @State private var showSubmitError = false
+    @State private var submitErrorMessage: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,6 +52,11 @@ struct NewRequestView: View {
         }
         .background(AppTheme.screenBackground)
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Unable to submit request", isPresented: $showSubmitError, actions: {
+            Button("OK", role: .cancel) {}
+        }, message: {
+            Text(submitErrorMessage ?? "Please try again.")
+        })
         .onChange(of: pickerItems) { newItems in
             Task { await loadPickedImages(from: newItems) }
         }
@@ -72,7 +81,7 @@ struct NewRequestView: View {
                     .foregroundStyle(AppTheme.textPrimary)
 
                 if descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Describe what's wrong with your \(servicePlaceholder)...")
+                    Text("Describe what's wrong with your \(serviceTitle.lowercased()) request...")
                         .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(Color.gray.opacity(0.6))
                         .padding(.horizontal, 18)
@@ -219,25 +228,31 @@ struct NewRequestView: View {
     private var submitSection: some View {
         VStack(spacing: 12) {
             Button {
-                // Endpoint call will be wired later
+                Task { await submitRequest() }
             } label: {
                 HStack {
                     Spacer()
-                    Text("Submit Request")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
+                    if isSubmitting {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("Submit Request")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
 
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.leading, 6)
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.leading, 6)
+                    }
                     Spacer()
                 }
                 .padding(.vertical, 18)
-                .background(AppTheme.primaryBlue)
+                .background(isSubmitting ? AppTheme.primaryBlue.opacity(0.6) : AppTheme.primaryBlue)
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(isSubmitting)
             .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 12)
 
             Text("A technician will be assigned to your location within\n15 minutes of submission.")
@@ -248,14 +263,46 @@ struct NewRequestView: View {
         .padding(.top, 8)
     }
 
-    private var servicePlaceholder: String {
-        let lower = serviceTitle.lowercased()
-        if lower.contains("bike") { return "bike" }
-        if lower.contains("car") { return "car" }
-        if lower.contains("electrical") { return "electrical issue" }
-        if lower.contains("hardware") { return "hardware" }
-        if lower.contains("tech") { return "device" }
-        return "request"
+    private func submitRequest() async {
+        let trimmedDescription = descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty else {
+            submitErrorMessage = "Please describe the issue before submitting."
+            showSubmitError = true
+            return
+        }
+
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        do {
+            _ = try await HelpRequestService.shared.createRequest(
+                category: category,
+                description: trimmedDescription,
+                latitude: region.center.latitude,
+                longitude: region.center.longitude,
+                scope: .helpZoneAndGlobal,
+                zoneId: nil,
+                photos: selectedImages
+            )
+            dismiss()
+        } catch {
+            submitErrorMessage = error.localizedDescription
+            showSubmitError = true
+            print("Error submitting request: \(error)")
+        }
+    }
+
+    private var serviceTitle: String {
+        switch category {
+        case .technicalAndRepair:
+            return "Technical & Repair"
+        case .physicalAndLogistics:
+            return "Physical & Logistics"
+        case .roadsideAndEmergency:
+            return "Roadside & Emergency"
+        case .errandsAndSocial:
+            return "Errands & Social"
+        }
     }
 
     private func loadPickedImages(from items: [PhotosPickerItem]) async {
@@ -278,7 +325,7 @@ private struct PinnedLocation: Identifiable {
 
 #Preview {
     NavigationStack {
-        NewRequestView(serviceTitle: "Bike Repair")
+        NewRequestView(category: .technicalAndRepair)
             .toolbar(.hidden, for: .navigationBar)
     }
 }

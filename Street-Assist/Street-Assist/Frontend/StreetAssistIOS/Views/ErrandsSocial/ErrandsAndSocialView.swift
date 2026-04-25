@@ -4,7 +4,6 @@ struct ErrandsAndSocialView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isShowingNewRequest = false
-    @State private var newRequestServiceTitle: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,7 +42,7 @@ struct ErrandsAndSocialView: View {
         .background(AppTheme.screenBackground)
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $isShowingNewRequest) {
-            NewRequestView(serviceTitle: newRequestServiceTitle)
+            NewRequestView(category: .errandsAndSocial)
         }
     }
 
@@ -111,7 +110,6 @@ struct ErrandsAndSocialView: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    newRequestServiceTitle = "Quick Coffee Run"
                     isShowingNewRequest = true
                 } label: {
                     Image(systemName: "plus")
@@ -140,7 +138,6 @@ struct ErrandsAndSocialView: View {
                 title: "Queue Holding",
                 subtitle: "We wait, you save time.",
                 onTap: {
-                    newRequestServiceTitle = "Queue Holding"
                     isShowingNewRequest = true
                 }
             )
@@ -152,7 +149,6 @@ struct ErrandsAndSocialView: View {
                 title: "Grocery Pick-up",
                 subtitle: "Fresh items delivered fast.",
                 onTap: {
-                    newRequestServiceTitle = "Grocery Pick-up"
                     isShowingNewRequest = true
                 }
             )
@@ -164,7 +160,6 @@ struct ErrandsAndSocialView: View {
                 title: "Translation Help",
                 subtitle: "Professional linguistic support",
                 onTap: {
-                    newRequestServiceTitle = "Translation Help"
                     isShowingNewRequest = true
                 }
             )

@@ -1,3 +1,5 @@
+import Combine
+import CoreLocation
 import SwiftUI
 
 struct IncomingRequestsView: View {
@@ -11,34 +13,13 @@ struct IncomingRequestsView: View {
     @State private var isShowingHelperModeSheet = false
     @State private var selectedScope: Scope = .helpZoneAndGlobal
 
-    private let placeholderRequests: [IncomingRequest] = [
-        .init(
-            category: "Roadside",
-            categoryStyle: .gray,
-            timeAgo: "20 mins ago",
-            distance: "450M AWAY",
-            title: "Flat Tire Assistance",
-            subtitle: "Sedan needs help changing to a spare near..."
-        ),
-        .init(
-            category: "Technical",
-            categoryStyle: .orange,
-            timeAgo: "5 mins ago",
-            distance: nil,
-            zone: "Zone: Central Campus",
-            zoneStyle: .green,
-            title: "Bike Chain Repair",
-            subtitle: "Chain snapped while commuting. Have tool..."
-        ),
-        .init(
-            category: "Physical",
-            categoryStyle: .gray,
-            timeAgo: "15 mins ago",
-            distance: nil,
-            title: "Heavy Lifting",
-            subtitle: "Need help moving a small dresser from the..."
-        ),
-    ]
+    @State private var requests: [IncomingRequest] = []
+    @State private var isLoadingRequests = false
+    @State private var loadErrorMessage: String?
+
+    @StateObject private var locationManager = IncomingLocationManager()
+
+    private let nearbyThresholdMeters: CLLocationDistance = 5000
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,13 +46,26 @@ struct IncomingRequestsView: View {
             if !session.isHelperEnabled {
                 isShowingHelperModeSheet = true
             }
+            locationManager.requestAccess()
+            Task { await loadIncomingRequests() }
         }
         .onChange(of: session.isHelperEnabled) { enabled in
             if enabled {
                 isShowingHelperModeSheet = false
+                Task { await loadIncomingRequests() }
             } else {
                 isShowingHelperModeSheet = true
+                requests = []
             }
+        }
+        .onChange(of: selectedScope) { _ in
+            Task { await loadIncomingRequests() }
+        }
+        .onChange(of: locationManager.location) { _ in
+            Task { await loadIncomingRequests() }
+        }
+        .refreshable {
+            await loadIncomingRequests()
         }
         .sheet(isPresented: $isShowingHelperModeSheet) {
             if #available(iOS 16.4, *) {
@@ -223,18 +217,165 @@ struct IncomingRequestsView: View {
 
                 Spacer()
 
-                Text("3 live nearby")
+                Text("\(requests.count) live nearby")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(AppTheme.primaryBlue)
             }
             .padding(.top, 6)
 
-            VStack(spacing: 14) {
-                ForEach(placeholderRequests) { request in
-                    IncomingRequestCardView(request: request)
+            if isLoadingRequests {
+                ProgressView("Loading requests...")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 24)
+            } else if let loadErrorMessage {
+                Text(loadErrorMessage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+            } else if locationManager.location == nil {
+                Text("Enable location access to receive nearby requests.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+            } else if requests.isEmpty {
+                Text("No nearby requests right now.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+            } else {
+                VStack(spacing: 14) {
+                    ForEach(requests) { request in
+                        IncomingRequestCardView(request: request)
+                    }
                 }
             }
         }
+    }
+
+    private func loadIncomingRequests() async {
+        guard session.isHelperEnabled else {
+            requests = []
+            return
+        }
+
+        guard let helperLocation = locationManager.location else {
+            requests = []
+            return
+        }
+
+        isLoadingRequests = true
+        loadErrorMessage = nil
+        defer { isLoadingRequests = false }
+
+        do {
+            let fetched = try await HelpRequestService.shared.fetchOpenRequests()
+
+            let filtered = fetched
+                .filter { request in
+                    switch selectedScope {
+                    case .helpZoneOnly:
+                        return request.scope == .helpZoneOnly
+                    case .helpZoneAndGlobal:
+                        return request.scope == .helpZoneOnly || request.scope == .helpZoneAndGlobal
+                    }
+                }
+                .compactMap { request -> IncomingRequest? in
+                    let requestLocation = CLLocation(latitude: request.latitude, longitude: request.longitude)
+                    let distance = helperLocation.distance(from: requestLocation)
+                    guard distance <= nearbyThresholdMeters else {
+                        return nil
+                    }
+
+                    return IncomingRequest(
+                        category: categoryText(for: request.category),
+                        categoryStyle: categoryStyle(for: request.category),
+                        timeAgo: relativeTime(from: request.createdAt),
+                        distance: distanceText(for: distance),
+                        timeSortValue: request.createdAt.timeIntervalSince1970,
+                        title: titleText(for: request),
+                        subtitle: subtitleText(for: request)
+                    )
+                }
+                .sorted { $0.timeSortValue > $1.timeSortValue }
+
+            requests = filtered
+        } catch {
+            requests = []
+            loadErrorMessage = "Unable to load requests: \(error.localizedDescription)"
+        }
+    }
+
+    private func categoryText(for category: HelpCategory) -> String {
+        switch category {
+        case .technicalAndRepair:
+            return "Technical"
+        case .physicalAndLogistics:
+            return "Physical"
+        case .roadsideAndEmergency:
+            return "Roadside"
+        case .errandsAndSocial:
+            return "Errands"
+        }
+    }
+
+    private func categoryStyle(for category: HelpCategory) -> IncomingRequest.TagStyle {
+        switch category {
+        case .technicalAndRepair:
+            return .orange
+        case .physicalAndLogistics:
+            return .gray
+        case .roadsideAndEmergency:
+            return .green
+        case .errandsAndSocial:
+            return .gray
+        }
+    }
+
+    private func titleText(for request: HelpRequest) -> String {
+        switch request.category {
+        case .technicalAndRepair:
+            return "Technical Help Needed"
+        case .physicalAndLogistics:
+            return "Physical Help Needed"
+        case .roadsideAndEmergency:
+            return "Roadside Emergency"
+        case .errandsAndSocial:
+            return "Errand Assistance Needed"
+        }
+    }
+
+    private func subtitleText(for request: HelpRequest) -> String {
+        let trimmed = request.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 56 {
+            return trimmed
+        }
+        return String(trimmed.prefix(56)) + "..."
+    }
+
+    private func relativeTime(from date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func distanceText(for meters: CLLocationDistance) -> String {
+        if meters < 1000 {
+            return "\(Int(meters.rounded()))M AWAY"
+        }
+
+        let km = meters / 1000
+        return String(format: "%.1fKM AWAY", km)
     }
 }
 
@@ -274,11 +415,52 @@ private struct IncomingRequest: Identifiable {
     let timeAgo: String
     let distance: String?
 
+    let timeSortValue: TimeInterval
+
     var zone: String? = nil
     var zoneStyle: TagStyle? = nil
 
     let title: String
     let subtitle: String
+}
+
+private final class IncomingLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var location: CLLocation?
+
+    private let manager = CLLocationManager()
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+    }
+
+    func requestAccess() {
+        let status = manager.authorizationStatus
+        if status == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+            return
+        }
+
+        if status == .authorizedWhenInUse || status == .authorizedAlways {
+            manager.requestLocation()
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        if status == .authorizedWhenInUse || status == .authorizedAlways {
+            manager.requestLocation()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        location = locations.last
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location error: \(error.localizedDescription)")
+    }
 }
 
 private struct IncomingRequestCardView: View {

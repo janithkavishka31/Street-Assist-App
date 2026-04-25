@@ -1,12 +1,5 @@
 import SwiftUI
 
-enum HelpCategory {
-    case technicalAndRepair
-    case physicalAndLogistics
-    case roadsideAndEmergency
-    case errandsAndSocial
-}
-
 struct HelpRequestSheetView: View {
     @Binding var isPresented: Bool
     var onSelectCategory: (HelpCategory) -> Void = { _ in }

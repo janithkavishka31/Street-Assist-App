@@ -30,11 +30,11 @@ final class SupabaseAuthService {
             throw SupabaseAuthServiceError.emptyPassword
         }
 
-        _ = try await supabase.auth.signIn(email: trimmedEmail, password: password)
+        _ = try await SupabaseManager.shared.client.auth.signIn(email: trimmedEmail, password: password)
     }
 
     func signOut() async throws {
-        try await supabase.auth.signOut()
+        try await SupabaseManager.shared.client.auth.signOut()
     }
 
     func signUpEmail(
@@ -71,7 +71,7 @@ final class SupabaseAuthService {
             data["skills"] = .array(skills.map { .string($0) })
         }
 
-        let response = try await supabase.auth.signUp(
+        let response = try await SupabaseManager.shared.client.auth.signUp(
             email: trimmedEmail,
             password: password,
             data: data

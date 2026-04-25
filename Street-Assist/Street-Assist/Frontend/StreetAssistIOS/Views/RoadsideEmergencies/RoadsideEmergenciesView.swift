@@ -4,7 +4,6 @@ struct RoadsideEmergenciesView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isShowingNewRequest = false
-    @State private var newRequestServiceTitle: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,7 +42,7 @@ struct RoadsideEmergenciesView: View {
         .background(AppTheme.screenBackground)
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $isShowingNewRequest) {
-            NewRequestView(serviceTitle: newRequestServiceTitle)
+            NewRequestView(category: .roadsideAndEmergency)
         }
     }
 
@@ -98,7 +97,6 @@ struct RoadsideEmergenciesView: View {
                     .foregroundStyle(.white.opacity(0.85))
 
                 Button {
-                    newRequestServiceTitle = "Rapid Battery Jump"
                     isShowingNewRequest = true
                 } label: {
                     Text("Request Now")
@@ -127,7 +125,6 @@ struct RoadsideEmergenciesView: View {
                 title: "Battery Jump Start",
                 subtitle: "Starts at $45",
                 onTap: {
-                    newRequestServiceTitle = "Battery Jump Start"
                     isShowingNewRequest = true
                 }
             )
@@ -139,7 +136,6 @@ struct RoadsideEmergenciesView: View {
                 title: "Flat Tire",
                 subtitle: "Tools provided",
                 onTap: {
-                    newRequestServiceTitle = "Flat Tire"
                     isShowingNewRequest = true
                 }
             )
@@ -151,7 +147,6 @@ struct RoadsideEmergenciesView: View {
                 title: "Fuel Delivery",
                 subtitle: "2 Gal Regular/Diesel",
                 onTap: {
-                    newRequestServiceTitle = "Fuel Delivery"
                     isShowingNewRequest = true
                 }
             )
@@ -163,7 +158,6 @@ struct RoadsideEmergenciesView: View {
                 title: "Lockout",
                 subtitle: "Non-destructive entry",
                 onTap: {
-                    newRequestServiceTitle = "Lockout"
                     isShowingNewRequest = true
                 }
             )

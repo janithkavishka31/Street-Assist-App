@@ -4,7 +4,6 @@ struct PhysicalLogisticsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isShowingNewRequest = false
-    @State private var newRequestServiceTitle: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,7 +43,7 @@ struct PhysicalLogisticsView: View {
         .background(AppTheme.screenBackground)
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $isShowingNewRequest) {
-            NewRequestView(serviceTitle: newRequestServiceTitle)
+            NewRequestView(category: .physicalAndLogistics)
         }
     }
 
@@ -95,7 +94,6 @@ struct PhysicalLogisticsView: View {
                     .lineSpacing(1)
 
                 Button {
-                    newRequestServiceTitle = "Quick Move Support"
                     isShowingNewRequest = true
                 } label: {
                     Text("Request Now")
@@ -124,7 +122,6 @@ struct PhysicalLogisticsView: View {
                 title: "Luggage Move",
                 subtitle: "Fast transport for bags & suitcases",
                 onTap: {
-                    newRequestServiceTitle = "Luggage Move"
                     isShowingNewRequest = true
                 }
             )
@@ -136,7 +133,6 @@ struct PhysicalLogisticsView: View {
                 title: "Vehicle Push",
                 subtitle: "On-site assist for stalled cars",
                 onTap: {
-                    newRequestServiceTitle = "Vehicle Push"
                     isShowingNewRequest = true
                 }
             )
@@ -148,7 +144,6 @@ struct PhysicalLogisticsView: View {
                 title: "Heavy Lifting",
                 subtitle: "Large items & equipment help",
                 onTap: {
-                    newRequestServiceTitle = "Heavy Lifting"
                     isShowingNewRequest = true
                 }
             )
@@ -160,7 +155,6 @@ struct PhysicalLogisticsView: View {
                 title: "Furniture Assembly",
                 subtitle: "Build & install flat-pack items",
                 onTap: {
-                    newRequestServiceTitle = "Furniture Assembly"
                     isShowingNewRequest = true
                 }
             )
