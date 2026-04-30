@@ -1,9 +1,10 @@
 import Foundation
 
-struct HelpRequest: Codable {
+struct HelpRequest: Codable, Identifiable, Hashable {
     let id: UUID
     let requesterUserId: UUID
     let category: HelpCategory
+    let serviceTitle: String
     let description: String
     let latitude: Double
     let longitude: Double
@@ -17,6 +18,7 @@ struct HelpRequest: Codable {
         case id
         case requesterUserId = "requester_user_id"
         case category
+        case serviceTitle = "service_title"
         case description
         case latitude
         case longitude

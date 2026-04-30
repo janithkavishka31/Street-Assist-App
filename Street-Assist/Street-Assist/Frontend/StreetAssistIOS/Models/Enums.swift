@@ -1,6 +1,6 @@
 import Foundation
 
-enum VerificationStatus: String, Codable {
+enum VerificationStatus: String, Codable, Hashable {
     case pending, approved, rejected
 }
 

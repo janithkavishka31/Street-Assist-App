@@ -230,6 +230,15 @@ create table public.leaderboard_entries (
   unique (leaderboard_week_id, mode, rank)
 );
 
+-- Active helper locations (real-time tracking for nearby helper discovery)
+create table public.helper_locations (
+  id              uuid          primary key default uuid_generate_v4(),
+  user_id         uuid          not null unique references public.users(id) on delete cascade,
+  latitude        double precision not null,
+  longitude       double precision not null,
+  updated_at      timestamptz   not null default now()
+);
+
 
 -- ------------------------------------------------------------
 -- 5. SEED DATA
@@ -336,6 +345,7 @@ alter table public.user_gamification                 enable row level security;
 alter table public.leaderboard_weeks                 enable row level security;
 alter table public.leaderboard_entries               enable row level security;
 alter table public.skills                            enable row level security;
+alter table public.helper_locations                  enable row level security;
 
 -- skills: public read
 create policy "skills_public_read" on public.skills
@@ -463,6 +473,19 @@ create policy "leaderboard_weeks_read" on public.leaderboard_weeks
 create policy "leaderboard_entries_read" on public.leaderboard_entries
   for select using (auth.uid() is not null);
 
+-- helper_locations: own read/write; others can read for nearby helper discovery
+create policy "helper_locations_read_own" on public.helper_locations
+  for select using (auth.uid() = user_id);
+
+create policy "helper_locations_read_others" on public.helper_locations
+  for select using (auth.uid() is not null);
+
+create policy "helper_locations_insert" on public.helper_locations
+  for insert with check (auth.uid() = user_id);
+
+create policy "helper_locations_update_own" on public.helper_locations
+  for update using (auth.uid() = user_id);
+
 
 -- ------------------------------------------------------------
 -- 9. INDEXES
@@ -471,6 +494,10 @@ create policy "leaderboard_entries_read" on public.leaderboard_entries
 -- Geo index for map-based request queries
 create index idx_help_requests_location
   on public.help_requests (latitude, longitude);
+
+-- Geo index for nearby helpers
+create index idx_helper_locations_geo
+  on public.helper_locations (latitude, longitude);
 
 -- Fast open request lookups
 create index idx_help_requests_status_scope

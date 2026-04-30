@@ -20,6 +20,11 @@ struct NewRequestView: View {
     @State private var isSubmitting = false
     @State private var showSubmitError = false
     @State private var submitErrorMessage: String? = nil
+    
+    @State private var requestScope: RequestScope = .helpZoneAndGlobal
+    @State private var joinedZones: [HelpZone] = []
+    @State private var selectedZone: HelpZone? = nil
+    @State private var isLoadingZones = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,6 +41,12 @@ struct NewRequestView: View {
                         .font(.system(size: 38, weight: .bold))
                         .foregroundStyle(AppTheme.primaryBlue)
                         .padding(.top, 6)
+
+                    scopeSelectionSection
+                    
+                    if requestScope == .helpZoneOnly {
+                        zoneSelectionSection
+                    }
 
                     problemDescriptionSection
 
@@ -59,6 +70,110 @@ struct NewRequestView: View {
         })
         .onChange(of: pickerItems) { newItems in
             Task { await loadPickedImages(from: newItems) }
+        }
+        .task {
+            await loadJoinedZones()
+        }
+    }
+
+    private var scopeSelectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Request Scope")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            HStack(spacing: 12) {
+                Button {
+                    requestScope = .helpZoneOnly
+                    if selectedZone == nil && !joinedZones.isEmpty {
+                        selectedZone = joinedZones.first
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            Image(systemName: requestScope == .helpZoneOnly ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(requestScope == .helpZoneOnly ? AppTheme.primaryBlue : AppTheme.textSecondary)
+                            
+                            Text("Zone Only")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        
+                        Text("Only zone members see this")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.leading, 26)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(requestScope == .helpZoneOnly ? AppTheme.categoryBlueBackground : AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    requestScope = .helpZoneAndGlobal
+                    selectedZone = nil
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            Image(systemName: requestScope == .helpZoneAndGlobal ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(requestScope == .helpZoneAndGlobal ? AppTheme.primaryBlue : AppTheme.textSecondary)
+                            
+                            Text("Public")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(AppTheme.textPrimary)
+                        }
+                        
+                        Text("All helpers see this")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.leading, 26)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(requestScope == .helpZoneAndGlobal ? AppTheme.categoryBlueBackground : AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+    
+    private var zoneSelectionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Select Zone")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if isLoadingZones {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else if joinedZones.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("You haven't joined any zones")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    
+                    Text("Create or join a zone first to make zone-only requests.")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                Picker("Zone", selection: $selectedZone) {
+                    ForEach(joinedZones) { zone in
+                        Text(zone.zoneName).tag(zone as HelpZone?)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
         }
     }
 
@@ -270,6 +385,12 @@ struct NewRequestView: View {
             showSubmitError = true
             return
         }
+        
+        if requestScope == .helpZoneOnly && selectedZone == nil {
+            submitErrorMessage = "Please select a zone for zone-only requests."
+            showSubmitError = true
+            return
+        }
 
         isSubmitting = true
         defer { isSubmitting = false }
@@ -280,8 +401,8 @@ struct NewRequestView: View {
                 description: trimmedDescription,
                 latitude: region.center.latitude,
                 longitude: region.center.longitude,
-                scope: .helpZoneAndGlobal,
-                zoneId: nil,
+                scope: requestScope,
+                zoneId: requestScope == .helpZoneOnly ? selectedZone?.id : nil,
                 photos: selectedImages
             )
             dismiss()
@@ -290,6 +411,21 @@ struct NewRequestView: View {
             showSubmitError = true
             print("Error submitting request: \(error)")
         }
+    }
+    
+    private func loadJoinedZones() async {
+        isLoadingZones = true
+        do {
+            let zones = try await HelpZoneService.shared.fetchJoinedZones()
+            joinedZones = zones.sorted { $0.zoneName.lowercased() < $1.zoneName.lowercased() }
+            if let first = joinedZones.first {
+                selectedZone = first
+            }
+        } catch {
+            print("Failed to load joined zones:", error)
+            joinedZones = []
+        }
+        isLoadingZones = false
     }
 
     private var serviceTitle: String {
@@ -317,6 +453,8 @@ struct NewRequestView: View {
         pickerItems = []
     }
 }
+
+// MARK: - Helper Types
 
 private struct PinnedLocation: Identifiable {
     let id = UUID()

@@ -1,6 +1,6 @@
 import Foundation
 
-struct HelpZone: Codable {
+struct HelpZone: Codable, Identifiable, Hashable {
     let id: UUID
     let zoneName: String
     let organizationName: String

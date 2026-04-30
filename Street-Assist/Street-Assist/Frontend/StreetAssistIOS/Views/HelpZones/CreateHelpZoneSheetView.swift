@@ -223,20 +223,56 @@ struct CreateHelpZoneSheetView: View {
 
     private var submitButton: some View {
         Button {
-            // Save/upload later
-            isPresented = false
+            submitCreate()
         } label: {
-            Text("Submit Verification")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(AppTheme.primaryBlue)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            if isSubmitting {
+                ProgressView()
+                    .tint(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(AppTheme.primaryBlue)
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            } else {
+                Text("Submit Verification")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(AppTheme.primaryBlue)
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            }
         }
         .buttonStyle(.plain)
         .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 12)
         .padding(.top, 6)
+        .disabled(isSubmitting || zoneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || organizationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .alert(item: $createdZone) { zone in
+            Alert(title: Text("Zone Created"), message: Text("Join code: \(zone.joinCode)"), dismissButton: .default(Text("OK")) {
+                isPresented = false
+            })
+        }
+    }
+
+    @State private var isSubmitting = false
+    @State private var createdZone: HelpZone?
+
+    private func submitCreate() {
+        isSubmitting = true
+        Task {
+            do {
+                let zone = try await HelpZoneService.shared.createZone(zoneName: zoneName, organizationName: organizationName)
+                DispatchQueue.main.async {
+                    createdZone = zone
+                    isSubmitting = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isSubmitting = false
+                    // Could show error toast — for now close sheet
+                    isPresented = false
+                }
+            }
+        }
     }
 }
 

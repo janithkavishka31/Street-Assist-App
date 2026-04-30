@@ -1,3 +1,4 @@
+import CoreLocation
 import MapKit
 import SwiftUI
 
@@ -15,6 +16,12 @@ struct HomeView: View {
         center: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783),
         span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
     )
+
+    @State private var nearbyHelpersCount = 0
+    @State private var isLoadingHelpers = false
+    @State private var isShowingNearbyHelpersMap = false
+
+    @StateObject private var locationManager = HomeLocationManager()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,6 +89,21 @@ struct HomeView: View {
         }
         .navigationDestination(isPresented: $isShowingErrandsAndSocial) {
             ErrandsAndSocialView()
+        }
+        .navigationDestination(isPresented: $isShowingNearbyHelpersMap) {
+            if let coordinate = locationManager.location?.coordinate {
+                NearbyHelpersMapView(helperCoordinate: coordinate)
+            }
+        }
+        .onAppear {
+            locationManager.requestAccess()
+            Task { await loadNearbyHelpersCount() }
+        }
+        .onChange(of: session.isHelperEnabled) { _ in
+            Task { await updateHelperStatus() }
+        }
+        .onChange(of: locationManager.location) { _ in
+            Task { await loadNearbyHelpersCount() }
         }
     }
 
@@ -183,9 +205,14 @@ struct HomeView: View {
 
     private var mapPreview: some View {
         ZStack(alignment: .bottomLeading) {
-            Map(coordinateRegion: $region)
-                .frame(height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+            Button {
+                isShowingNearbyHelpersMap = true
+            } label: {
+                Map(coordinateRegion: $region)
+                    .frame(height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusMedium, style: .continuous))
+            }
+            .buttonStyle(.plain)
 
             helpersNearbyOverlay
                 .padding(12)
@@ -196,7 +223,7 @@ struct HomeView: View {
         HStack(spacing: 10) {
             avatarStack
 
-            Text("12 Helpers Nearby")
+            Text("\(nearbyHelpersCount) Helpers Nearby")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
 
@@ -234,7 +261,7 @@ struct HomeView: View {
             Circle()
                 .fill(AppTheme.primaryBlue)
                 .frame(width: 34, height: 28)
-                .overlay(Text("+9").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
+                .overlay(Text("+\(max(0, nearbyHelpersCount - 2))").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.white, lineWidth: 2))
         }
@@ -267,6 +294,69 @@ struct HomeView: View {
         .background(AppTheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
         .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 10)
+    }
+
+    @MainActor
+    private func loadNearbyHelpersCount() async {
+        isLoadingHelpers = true
+        defer { isLoadingHelpers = false }
+
+        guard let location = locationManager.location else {
+            nearbyHelpersCount = 0
+            return
+        }
+
+        do {
+            let helpers = try await HelpRequestService.shared.fetchNearbyHelpers(
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude,
+                radiusMeters: 5000
+            )
+            nearbyHelpersCount = helpers.count
+        } catch {
+            print("Error loading nearby helpers count: \(error.localizedDescription)")
+            nearbyHelpersCount = 0
+        }
+    }
+
+    @MainActor
+    private func updateHelperStatus() async {
+        guard let location = locationManager.location else {
+            if session.isHelperEnabled {
+                await loadNearbyHelpersCount()
+            } else {
+                // Clear helper location when disabling helper mode
+                do {
+                    try await HelpRequestService.shared.deleteHelperLocation()
+                    nearbyHelpersCount = 0
+                } catch {
+                    print("Error clearing helper location: \(error.localizedDescription)")
+                }
+            }
+            return
+        }
+
+        if session.isHelperEnabled {
+            // Update helper location when enabling
+            do {
+                try await HelpRequestService.shared.updateHelperLocation(
+                    latitude: location.coordinate.latitude,
+                    longitude: location.coordinate.longitude
+                )
+                await loadNearbyHelpersCount()
+            } catch {
+                print("Error updating helper location: \(error.localizedDescription)")
+                session.isHelperEnabled = false
+            }
+        } else {
+            // Clear helper location when disabling
+            do {
+                try await HelpRequestService.shared.deleteHelperLocation()
+                nearbyHelpersCount = 0
+            } catch {
+                print("Error clearing helper location: \(error.localizedDescription)")
+            }
+        }
     }
 }
 

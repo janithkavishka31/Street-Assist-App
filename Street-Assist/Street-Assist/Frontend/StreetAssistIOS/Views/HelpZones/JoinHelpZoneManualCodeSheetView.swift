@@ -90,20 +90,57 @@ struct JoinHelpZoneManualCodeSheetView: View {
 
     private var submitButton: some View {
         Button {
-            // Save/join later when backend is connected
-            isPresented = false
+            submitJoin()
         } label: {
-            Text("Submit Verification")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(AppTheme.primaryBlue)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            if isSubmitting {
+                ProgressView()
+                    .tint(.white)
+            } else {
+                Text("Join Zone")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .background(AppTheme.primaryBlue)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .buttonStyle(.plain)
         .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 12)
         .padding(.top, 8)
+        .disabled(isSubmitting || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .alert(isPresented: $showSuccess) {
+            Alert(title: Text("Joined"), message: Text("Successfully joined zone."), dismissButton: .default(Text("OK")) {
+                isPresented = false
+            })
+        }
+        .alert(isPresented: $showError) {
+            Alert(title: Text("Error"), message: Text(errorMessage ?? "Unable to join."), dismissButton: .default(Text("OK")))
+        }
+    }
+
+    @State private var isSubmitting = false
+    @State private var showSuccess = false
+    @State private var showError = false
+    @State private var errorMessage: String?
+
+    private func submitJoin() {
+        isSubmitting = true
+        Task {
+            do {
+                _ = try await HelpZoneService.shared.joinZone(joinCode: code.trimmingCharacters(in: .whitespacesAndNewlines))
+                DispatchQueue.main.async {
+                    isSubmitting = false
+                    showSuccess = true
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isSubmitting = false
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
     }
 }
 
