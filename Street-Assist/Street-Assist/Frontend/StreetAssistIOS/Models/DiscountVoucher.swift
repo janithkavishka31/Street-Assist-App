@@ -1,20 +1,41 @@
 import Foundation
 
-struct LeaderboardWeek: Decodable {
+struct DiscountVoucher: Decodable, Identifiable {
     let id: UUID
-    let weekStartDate: Date
+    let userId: UUID
+    let mode: LeaderboardMode
+    let source: String
+    let discountPercent: Int
+    let validFrom: Date
+    let validUntil: Date
+    let isUsed: Bool
+    let requestId: UUID?
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
         case id
-        case weekStartDate = "week_start_date"
+        case userId = "user_id"
+        case mode
+        case source
+        case discountPercent = "discount_percent"
+        case validFrom = "valid_from"
+        case validUntil = "valid_until"
+        case isUsed = "is_used"
+        case requestId = "request_id"
         case createdAt = "created_at"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
-        weekStartDate = try Self.decodeDate(from: container, forKey: .weekStartDate)
+        userId = try container.decode(UUID.self, forKey: .userId)
+        mode = try container.decode(LeaderboardMode.self, forKey: .mode)
+        source = try container.decode(String.self, forKey: .source)
+        discountPercent = try container.decode(Int.self, forKey: .discountPercent)
+        validFrom = try Self.decodeDate(from: container, forKey: .validFrom)
+        validUntil = try Self.decodeDate(from: container, forKey: .validUntil)
+        isUsed = try container.decode(Bool.self, forKey: .isUsed)
+        requestId = try container.decodeIfPresent(UUID.self, forKey: .requestId)
         createdAt = try Self.decodeDate(from: container, forKey: .createdAt)
     }
 

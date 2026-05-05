@@ -11,6 +11,7 @@ struct HelpRequest: Codable, Identifiable, Hashable {
     let scope: RequestScope
     let zoneId: UUID?
     let status: RequestStatus
+    let requesterCompletedAt: Date?
     let createdAt: Date
     let updatedAt: Date
 
@@ -25,6 +26,7 @@ struct HelpRequest: Codable, Identifiable, Hashable {
         case scope
         case zoneId = "zone_id"
         case status
+        case requesterCompletedAt = "requester_completed_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

@@ -9,15 +9,16 @@ struct RankingsView: View {
     var onBack: (() -> Void)?
 
     @State private var selectedMode: Mode = .helper
+    @State private var dashboard: RankingsDashboard?
+    @State private var isLoading = false
+    @State private var alertMessage: String?
+    @State private var isShowingAlert = false
+    @State private var isClaimingTopTenVoucher = false
+    @State private var isOpeningGiftBox = false
 
-    private let weeklyLeaderboard: [LeaderboardEntry] = [
-        .init(rank: 1, name: "Alex G.", title: "Platinum Helper", points: 140),
-        .init(rank: 2, name: "Maria K.", title: "Elite Guardian", points: 128),
-        .init(rank: 3, name: "James L.", title: "Steady Pulse", points: 115),
-        .init(rank: 4, name: "Sarah Jenkins", title: nil, points: 98),
-        .init(rank: 5, name: "David Chen", title: nil, points: 87),
-        .init(rank: 6, name: "You", title: nil, points: 82, highlight: true),
-    ]
+    private var apiMode: LeaderboardMode {
+        selectedMode == .helper ? .helper : .requester
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,6 +50,19 @@ struct RankingsView: View {
         }
         .background(AppTheme.screenBackground)
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await loadDashboard()
+        }
+        .onChange(of: selectedMode) { _ in
+            Task { await loadDashboard() }
+        }
+        .alert("Rankings", isPresented: $isShowingAlert) {
+            Button("OK", role: .cancel) {
+                alertMessage = nil
+            }
+        } message: {
+            Text(alertMessage ?? "Something went wrong")
+        }
     }
 
     private var modePicker: some View {
@@ -83,13 +97,14 @@ struct RankingsView: View {
     }
 
     private var currentProgress: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let streak = dashboard?.currentStreakDays ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
             Text("CURRENT PROGRESS")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(AppTheme.primaryBlue)
                 .tracking(1.2)
 
-            Text("You're on fire! 5-day\nstreak.")
+            Text("You're on fire! \(streak)-day\nstreak.")
                 .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(AppTheme.textPrimary)
                 .lineSpacing(2)
@@ -97,14 +112,17 @@ struct RankingsView: View {
     }
 
     private var streakCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let currentStreak = dashboard?.currentStreakDays ?? 0
+        let bestStreak = dashboard?.bestStreakDays ?? 0
+        let giftUnlocked = dashboard?.giftUnlocked ?? false
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Personal Best: My Streak")
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(AppTheme.textPrimary)
 
-                    Text("Unlock a special reward at 7 days!")
+                    Text("Best streak: \(bestStreak) days. Unlock reward at 7 days!")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
@@ -126,7 +144,7 @@ struct RankingsView: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(AppTheme.categoryOrange)
 
-                        Text("LOCKED")
+                        Text(giftUnlocked ? "UNLOCKED" : "LOCKED")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(Color.white)
                             .padding(.horizontal, 8)
@@ -156,13 +174,13 @@ struct RankingsView: View {
 
                 Spacer()
 
-                Text("5/7 DAYS")
+                Text("\(min(currentStreak, 7))/7 DAYS")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(AppTheme.primaryBlue)
                     .tracking(0.8)
             }
 
-            ProgressPillsView(current: 5, total: 7)
+            ProgressPillsView(current: min(currentStreak, 7), total: 7)
 
             HStack {
                 ForEach(1...7, id: \.self) { day in
@@ -172,6 +190,29 @@ struct RankingsView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+
+            Button {
+                Task { await openGiftBox() }
+            } label: {
+                if isOpeningGiftBox {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(AppTheme.primaryBlue)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                } else {
+                    Text(giftUnlocked ? "Open Gift Box" : "Gift Box Locked (Need 7 Days)")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(giftUnlocked ? AppTheme.primaryBlue : Color.gray.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isOpeningGiftBox || !giftUnlocked)
         }
         .padding(18)
         .background(Color.black.opacity(0.03))
@@ -189,21 +230,28 @@ struct RankingsView: View {
                 Spacer()
 
                 Button {
-                    // wired later
+                    Task { await claimTopTenVoucher() }
                 } label: {
-                    Text("View all")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(AppTheme.primaryBlue)
+                    if isClaimingTopTenVoucher {
+                        Text("Claiming...")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle((dashboard?.canClaimTopTenVoucher ?? false) ? AppTheme.primaryBlue : AppTheme.textSecondary)
+                    } else {
+                        Text("Claim Top 10")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle((dashboard?.canClaimTopTenVoucher ?? false) ? AppTheme.primaryBlue : AppTheme.textSecondary)
+                    }
                 }
                 .buttonStyle(.plain)
+                .disabled(isClaimingTopTenVoucher || !(dashboard?.canClaimTopTenVoucher ?? false))
             }
 
-            WeeklyRewardCardView()
+            WeeklyRewardCardView(activeVoucher: dashboard?.activeVoucher, modeLabel: selectedMode.rawValue)
         }
     }
 
     private var weeklyLeaderboardSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("Weekly Leaderboard")
                     .font(.system(size: 22, weight: .bold))
@@ -227,7 +275,57 @@ struct RankingsView: View {
                 .shadow(color: AppTheme.shadow, radius: 10, x: 0, y: 6)
             }
 
-            LeaderboardCardView(entries: weeklyLeaderboard)
+            if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            } else {
+                LeaderboardCardView(entries: dashboard?.weeklyLeaderboard ?? [])
+            }
+        }
+    }
+
+    private func loadDashboard() async {
+        isLoading = true
+        do {
+            dashboard = try await RankingsService.shared.fetchDashboard(mode: apiMode)
+        } catch {
+            alertMessage = error.localizedDescription
+            isShowingAlert = true
+        }
+        isLoading = false
+    }
+
+    private func claimTopTenVoucher() async {
+        guard dashboard?.canClaimTopTenVoucher == true else { return }
+        isClaimingTopTenVoucher = true
+        defer { isClaimingTopTenVoucher = false }
+
+        do {
+            let voucher = try await RankingsService.shared.claimTopTenVoucher(mode: apiMode)
+            alertMessage = "Top 10 reward claimed: \(voucher.discountPercent)% off for 3 days."
+            isShowingAlert = true
+            dashboard = try await RankingsService.shared.fetchDashboard(mode: apiMode)
+        } catch {
+            alertMessage = error.localizedDescription
+            isShowingAlert = true
+        }
+    }
+
+    private func openGiftBox() async {
+        guard dashboard?.giftUnlocked == true else { return }
+        isOpeningGiftBox = true
+        defer { isOpeningGiftBox = false }
+
+        do {
+            let voucher = try await RankingsService.shared.openGiftBox(mode: apiMode)
+            let modeText = selectedMode.rawValue.lowercased()
+            alertMessage = "Gift opened: \(voucher.discountPercent)% \(modeText) voucher unlocked."
+            isShowingAlert = true
+            dashboard = try await RankingsService.shared.fetchDashboard(mode: apiMode)
+        } catch {
+            alertMessage = error.localizedDescription
+            isShowingAlert = true
         }
     }
 }
@@ -248,6 +346,9 @@ private struct ProgressPillsView: View {
 }
 
 private struct WeeklyRewardCardView: View {
+    let activeVoucher: DiscountVoucher?
+    let modeLabel: String
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous)
@@ -274,15 +375,15 @@ private struct WeeklyRewardCardView: View {
                     .background(Color.white.opacity(0.18))
                     .clipShape(Capsule())
 
-                Text("20% Off")
+                Text("\(activeVoucher?.discountPercent ?? 0)% Off")
                     .font(.system(size: 44, weight: .bold))
                     .foregroundStyle(Color.white)
 
-                Text("App Service Fees")
+                Text("\(modeLabel) App Service Fees")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(Color.white.opacity(0.95))
 
-                Text("Top 10 placement reward for Week 42.")
+                Text(activeVoucher == nil ? "Reach Top 10 or complete 7-day streak to unlock a voucher." : "Voucher source: \(activeVoucher?.source.replacingOccurrences(of: "_", with: " ") ?? "reward").")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.75))
                     .padding(.top, 2)
@@ -296,25 +397,24 @@ private struct WeeklyRewardCardView: View {
     }
 }
 
-private struct LeaderboardEntry: Identifiable {
-    let id = UUID()
-    let rank: Int
-    let name: String
-    let title: String?
-    let points: Int
-    var highlight: Bool = false
-}
-
 private struct LeaderboardCardView: View {
-    let entries: [LeaderboardEntry]
+    let entries: [RankingsLeaderboardEntry]
 
     var body: some View {
         VStack(spacing: 12) {
-            ForEach(entries) { entry in
-                if entry.rank <= 3 {
-                    TopLeaderboardRow(entry: entry)
-                } else {
-                    StandardLeaderboardRow(entry: entry)
+            if entries.isEmpty {
+                Text("No leaderboard data for this week yet.")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+            } else {
+                ForEach(entries) { entry in
+                    if entry.rank <= 3 {
+                        TopLeaderboardRow(entry: entry)
+                    } else {
+                        StandardLeaderboardRow(entry: entry)
+                    }
                 }
             }
         }
@@ -326,7 +426,7 @@ private struct LeaderboardCardView: View {
 }
 
 private struct TopLeaderboardRow: View {
-    let entry: LeaderboardEntry
+    let entry: RankingsLeaderboardEntry
 
     private var badgeStroke: Color {
         switch entry.rank {
@@ -381,7 +481,7 @@ private struct TopLeaderboardRow: View {
 }
 
 private struct StandardLeaderboardRow: View {
-    let entry: LeaderboardEntry
+    let entry: RankingsLeaderboardEntry
 
     var body: some View {
         HStack(spacing: 12) {

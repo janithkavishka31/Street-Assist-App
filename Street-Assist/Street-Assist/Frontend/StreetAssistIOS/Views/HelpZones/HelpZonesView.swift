@@ -10,6 +10,7 @@ struct HelpZonesView: View {
     @State private var isLoadingZones: Bool = false
     @State private var zoneOnlyRequests: [HelpRequest] = []
     @State private var isLoadingRequests: Bool = false
+    @State private var joinErrorMessage: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -155,7 +156,32 @@ struct HelpZonesView: View {
             await loadZoneOnlyRequests()
         }
         .sheet(isPresented: $isShowingJoinZoneScannerSheet) {
-            if #available(iOS 16.4, *) {
+                if #available(iOS 16.4, *) {
+                JoinHelpZoneScannerSheetView(
+                    isPresented: $isShowingJoinZoneScannerSheet,
+                    onManualEntry: { isShowingJoinZoneManualSheet = true },
+                    onScanned: { code in
+                        Task {
+                                do {
+                                    _ = try await HelpZoneService.shared.joinZone(joinCode: code)
+                                    // refresh joined zones and close scanner
+                                    await loadJoinedZones()
+                                    DispatchQueue.main.async {
+                                        isShowingJoinZoneScannerSheet = false
+                                    }
+                                } catch {
+                                    DispatchQueue.main.async {
+                                        isShowingJoinZoneScannerSheet = false
+                                        joinErrorMessage = error.localizedDescription
+                                    }
+                                }
+                        }
+                    }
+                )
+                .presentationDetents([.fraction(0.78)])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                } else if #available(iOS 16.0, *) {
                 JoinHelpZoneScannerSheetView(
                     isPresented: $isShowingJoinZoneScannerSheet,
                     onManualEntry: { isShowingJoinZoneManualSheet = true },
@@ -163,25 +189,15 @@ struct HelpZonesView: View {
                         Task {
                             do {
                                 _ = try await HelpZoneService.shared.joinZone(joinCode: code)
-                                // show simple confirmation
-                                isShowingJoinZoneScannerSheet = false
+                                await loadJoinedZones()
+                                DispatchQueue.main.async { isShowingJoinZoneScannerSheet = false }
                             } catch {
-                                // Optionally show an alert — for now close scanner
-                                isShowingJoinZoneScannerSheet = false
+                                DispatchQueue.main.async {
+                                    isShowingJoinZoneScannerSheet = false
+                                    joinErrorMessage = error.localizedDescription
+                                }
                             }
                         }
-                    }
-                )
-                .presentationDetents([.fraction(0.78)])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(28)
-            } else if #available(iOS 16.0, *) {
-                JoinHelpZoneScannerSheetView(
-                    isPresented: $isShowingJoinZoneScannerSheet,
-                    onManualEntry: { isShowingJoinZoneManualSheet = true },
-                    onScanned: { code in
-                        Task { _ = try? await HelpZoneService.shared.joinZone(joinCode: code) }
-                        isShowingJoinZoneScannerSheet = false
                     }
                 )
                 .presentationDetents([.large])
@@ -190,10 +206,29 @@ struct HelpZonesView: View {
                 JoinHelpZoneScannerSheetView(
                     isPresented: $isShowingJoinZoneScannerSheet,
                     onManualEntry: { isShowingJoinZoneManualSheet = true },
-                    onScanned: { code in Task { _ = try? await HelpZoneService.shared.joinZone(joinCode: code) }; isShowingJoinZoneScannerSheet = false }
+                    onScanned: { code in Task {
+                        do {
+                            _ = try await HelpZoneService.shared.joinZone(joinCode: code)
+                            await loadJoinedZones()
+                            DispatchQueue.main.async { isShowingJoinZoneScannerSheet = false }
+                        } catch {
+                            DispatchQueue.main.async {
+                                isShowingJoinZoneScannerSheet = false
+                                joinErrorMessage = error.localizedDescription
+                            }
+                        }
+                    } }
                 )
             }
         }
+        .alert("Join Zone Failed", isPresented: Binding(
+            get: { joinErrorMessage != nil },
+            set: { if !$0 { joinErrorMessage = nil } }
+        ), actions: {
+            Button("OK", role: .cancel) { joinErrorMessage = nil }
+        }, message: {
+            Text(joinErrorMessage ?? "Unable to join zone.")
+        })
         .sheet(isPresented: $isShowingJoinZoneManualSheet) {
             if #available(iOS 16.4, *) {
                 JoinHelpZoneManualCodeSheetView(isPresented: $isShowingJoinZoneManualSheet)

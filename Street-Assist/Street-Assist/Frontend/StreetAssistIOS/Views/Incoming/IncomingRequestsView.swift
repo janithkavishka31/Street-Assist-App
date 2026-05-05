@@ -26,6 +26,7 @@ struct IncomingRequestsView: View {
     @State private var acceptedRequestIds: Set<UUID> = [] // Track which requests are accepted
 
     @StateObject private var locationManager = IncomingLocationManager()
+    @State private var loadRequestsTask: Task<Void, Never>?
 
     private let nearbyThresholdMeters: CLLocationDistance = 5000
 
@@ -55,25 +56,29 @@ struct IncomingRequestsView: View {
                 isShowingHelperModeSheet = true
             }
             locationManager.requestAccess()
-            Task { await loadIncomingRequests() }
+            triggerLoadIncomingRequests()
         }
         .onChange(of: session.isHelperEnabled) { enabled in
             if enabled {
                 isShowingHelperModeSheet = false
-                Task { await loadIncomingRequests() }
+                triggerLoadIncomingRequests()
             } else {
                 isShowingHelperModeSheet = true
                 requests = []
+                loadRequestsTask?.cancel()
             }
         }
         .onChange(of: selectedScope) { _ in
-            Task { await loadIncomingRequests() }
+            triggerLoadIncomingRequests()
         }
         .onChange(of: locationManager.location) { _ in
-            Task { await loadIncomingRequests() }
+            triggerLoadIncomingRequests()
         }
         .refreshable {
             await loadIncomingRequests()
+        }
+        .onDisappear {
+            loadRequestsTask?.cancel()
         }
         .sheet(isPresented: $isShowingHelperModeSheet) {
             if #available(iOS 16.4, *) {
@@ -386,9 +391,18 @@ struct IncomingRequestsView: View {
             acceptedRequestIds = Set(acceptances.map { $0.requestId })
 
             requests = filtered
+        } catch is CancellationError {
+            // Ignore expected cancellation from rapid state/location refreshes.
         } catch {
             requests = []
             loadErrorMessage = "Unable to load requests: \(error.localizedDescription)"
+        }
+    }
+
+    private func triggerLoadIncomingRequests() {
+        loadRequestsTask?.cancel()
+        loadRequestsTask = Task {
+            await loadIncomingRequests()
         }
     }
 
@@ -858,13 +872,15 @@ private struct ViewAcceptedRequestView: View {
     let requesterCoordinate: CLLocationCoordinate2D
 
     @Environment(\.dismiss) private var dismiss
+    @State private var isCompletingTask = false
+    @State private var taskCompletionMessage: String?
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
                 VStack(spacing: 14) {
                     headerRow
-                    
+
                     RouteMapView(
                         helperCoordinate: helperCoordinate,
                         requesterCoordinate: requesterCoordinate
@@ -872,6 +888,37 @@ private struct ViewAcceptedRequestView: View {
                     .frame(height: 400)
                     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .padding(20)
+
+                    if let taskCompletionMessage {
+                        Text(taskCompletionMessage)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(.horizontal, 20)
+                    }
+
+                    Button {
+                        markTaskCompleted()
+                    } label: {
+                        if isCompletingTask {
+                            ProgressView()
+                                .tint(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(AppTheme.primaryBlue)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        } else {
+                            Text("Mark Task as Completed")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(AppTheme.primaryBlue)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .disabled(isCompletingTask)
                 }
                 .background(AppTheme.screenBackground)
 
@@ -909,6 +956,28 @@ private struct ViewAcceptedRequestView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
+    }
+
+    private func markTaskCompleted() {
+        guard !isCompletingTask else { return }
+        isCompletingTask = true
+        taskCompletionMessage = nil
+
+        Task {
+            do {
+                try await HelpRequestService.shared.markHelperTaskCompleted(requestId: request.requestId)
+                await MainActor.run {
+                    taskCompletionMessage = "Marked as completed. Waiting for requester confirmation and payment."
+                }
+            } catch {
+                await MainActor.run {
+                    taskCompletionMessage = "Unable to mark completion: \(error.localizedDescription)"
+                }
+            }
+            await MainActor.run {
+                isCompletingTask = false
+            }
+        }
     }
 }
 

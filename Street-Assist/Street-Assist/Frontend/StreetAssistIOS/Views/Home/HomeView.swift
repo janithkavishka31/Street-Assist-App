@@ -22,6 +22,11 @@ struct HomeView: View {
     @State private var isShowingNearbyHelpersMap = false
 
     @StateObject private var locationManager = HomeLocationManager()
+    @State private var activeRequesterTask: HelpRequestService.RequesterActiveTask?
+    @State private var isLoadingActiveTask = false
+    @State private var requesterMessage: String?
+    @State private var isShowingPaymentSheet = false
+    @State private var paymentTask: HelpRequestService.RequesterActiveTask?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +37,7 @@ struct HomeView: View {
                     helperToggleCard
                     scopeSelector
                     needAHandCard
+                    requesterActiveTaskSection
                     mapPreview
                     statsRow
                 }
@@ -97,13 +103,26 @@ struct HomeView: View {
         }
         .onAppear {
             locationManager.requestAccess()
-            Task { await loadNearbyHelpersCount() }
+            Task {
+                await loadNearbyHelpersCount()
+                await loadActiveRequesterTask()
+            }
         }
         .onChange(of: session.isHelperEnabled) { _ in
             Task { await updateHelperStatus() }
         }
         .onChange(of: locationManager.location) { _ in
             Task { await loadNearbyHelpersCount() }
+        }
+        .sheet(isPresented: $isShowingPaymentSheet, onDismiss: {
+            Task { await loadActiveRequesterTask() }
+        }) {
+            if let paymentTask {
+                RequestPaymentSheetView(
+                    task: paymentTask,
+                    isPresented: $isShowingPaymentSheet
+                )
+            }
         }
     }
 
@@ -216,6 +235,73 @@ struct HomeView: View {
 
             helpersNearbyOverlay
                 .padding(12)
+        }
+    }
+
+    private var requesterActiveTaskSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Current Task")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+            }
+
+            if isLoadingActiveTask {
+                ProgressView("Loading your active task...")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+            } else if let task = activeRequesterTask {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(task.request.serviceTitle)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Text("Helper: \(task.helperName)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+
+                    Text(task.request.description)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(2)
+
+                    if let requesterMessage {
+                        Text(requesterMessage)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.primaryBlue)
+                    }
+
+                    Button {
+                        markRequesterTaskCompleted(task)
+                    } label: {
+                        Text("Confirm Task Completion")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(AppTheme.primaryBlue)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(16)
+                .background(AppTheme.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+                .shadow(color: AppTheme.shadow, radius: 14, x: 0, y: 10)
+            } else {
+                Text("No accepted task pending payment.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+            }
         }
     }
 
@@ -358,11 +444,251 @@ struct HomeView: View {
             }
         }
     }
+
+    @MainActor
+    private func loadActiveRequesterTask() async {
+        isLoadingActiveTask = true
+        defer { isLoadingActiveTask = false }
+        do {
+            activeRequesterTask = try await HelpRequestService.shared.fetchActiveRequesterTask()
+        } catch {
+            activeRequesterTask = nil
+            requesterMessage = "Unable to load active task: \(error.localizedDescription)"
+        }
+    }
+
+    private func markRequesterTaskCompleted(_ task: HelpRequestService.RequesterActiveTask) {
+        Task {
+            do {
+                try await HelpRequestService.shared.markRequesterTaskCompleted(requestId: task.request.id)
+                let refreshedTask = try await HelpRequestService.shared.fetchActiveRequesterTask()
+                await MainActor.run {
+                    activeRequesterTask = refreshedTask
+                    if let refreshedTask, refreshedTask.acceptance.completedAt != nil {
+                        paymentTask = refreshedTask
+                        isShowingPaymentSheet = true
+                        requesterMessage = nil
+                    } else {
+                        requesterMessage = "Marked completed. Waiting for helper completion to unlock payment."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    requesterMessage = "Unable to mark completion: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
 }
 
 enum HelpScope {
     case helpZoneOnly
     case helpZoneAndGlobal
+}
+
+private struct RequestPaymentSheetView: View {
+    let task: HelpRequestService.RequesterActiveTask
+    @Binding var isPresented: Bool
+
+    @State private var vouchers: [DiscountVoucher] = []
+    @State private var selectedVoucherId: UUID?
+    @State private var isLoadingVouchers = false
+    @State private var isPaying = false
+    @State private var paymentMessage: String?
+
+    private var selectedVoucher: DiscountVoucher? {
+        vouchers.first(where: { $0.id == selectedVoucherId })
+    }
+
+    private var baseAmount: Double {
+        switch task.request.category {
+        case .technicalAndRepair: return 18
+        case .physicalAndLogistics: return 15
+        case .roadsideAndEmergency: return 20
+        case .errandsAndSocial: return 12
+        }
+    }
+
+    private var discountFraction: Double {
+        Double(selectedVoucher?.discountPercent ?? 0) / 100
+    }
+
+    private var discountAmount: Double {
+        baseAmount * discountFraction
+    }
+
+    private var finalAmount: Double {
+        max(0, baseAmount - discountAmount)
+    }
+
+    var body: some View {
+        ZStack {
+            AppTheme.sheetBackground
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Complete Payment")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Text("Pay \(task.helperName) for the completed task")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        isPresented = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(10)
+                            .background(Color.black.opacity(0.06))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    paymentRow(title: "Service fee", value: baseAmount)
+                    paymentRow(title: "Discount", value: -discountAmount)
+                    Divider()
+                    paymentRow(title: "Total", value: finalAmount, isTotal: true)
+                }
+                .padding(16)
+                .background(AppTheme.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Apply Coupon")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    if isLoadingVouchers {
+                        ProgressView()
+                    } else if vouchers.isEmpty {
+                        Text("No active discount coupons available.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    } else {
+                        ForEach(vouchers) { voucher in
+                            Button {
+                                selectedVoucherId = (selectedVoucherId == voucher.id) ? nil : voucher.id
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedVoucherId == voucher.id ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedVoucherId == voucher.id ? AppTheme.primaryBlue : AppTheme.textSecondary)
+
+                                    Text("\(voucher.discountPercent)% off (\(voucher.source.replacingOccurrences(of: "_", with: " ")))")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(AppTheme.textPrimary)
+
+                                    Spacer()
+                                }
+                                .padding(12)
+                                .background(AppTheme.cardBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(AppTheme.border, lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if let paymentMessage {
+                    Text(paymentMessage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                Button {
+                    completePayment()
+                } label: {
+                    if isPaying {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(AppTheme.primaryBlue)
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    } else {
+                        Text("Pay $\(String(format: "%.2f", finalAmount))")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(AppTheme.primaryBlue)
+                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isPaying)
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+        }
+        .task {
+            await loadVouchers()
+        }
+    }
+
+    private func paymentRow(title: String, value: Double, isTotal: Bool = false) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: isTotal ? 16 : 14, weight: isTotal ? .bold : .medium))
+                .foregroundStyle(AppTheme.textPrimary)
+            Spacer()
+            Text("$\(String(format: "%.2f", value))")
+                .font(.system(size: isTotal ? 18 : 14, weight: .bold))
+                .foregroundStyle(isTotal ? AppTheme.primaryBlue : AppTheme.textSecondary)
+        }
+    }
+
+    private func loadVouchers() async {
+        isLoadingVouchers = true
+        defer { isLoadingVouchers = false }
+        do {
+            vouchers = try await HelpRequestService.shared.fetchAvailableDiscountVouchers(mode: .requester)
+        } catch {
+            paymentMessage = "Could not load vouchers: \(error.localizedDescription)"
+        }
+    }
+
+    private func completePayment() {
+        guard !isPaying else { return }
+        isPaying = true
+        paymentMessage = nil
+
+        Task {
+            do {
+                try await HelpRequestService.shared.completePayment(
+                    requestId: task.request.id,
+                    selectedVoucher: selectedVoucher
+                )
+                await MainActor.run {
+                    paymentMessage = "Payment completed successfully."
+                }
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                await MainActor.run {
+                    isPresented = false
+                }
+            } catch {
+                await MainActor.run {
+                    paymentMessage = "Payment failed: \(error.localizedDescription)"
+                }
+            }
+            await MainActor.run {
+                isPaying = false
+            }
+        }
+    }
 }
 
 #Preview {

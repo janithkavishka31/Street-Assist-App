@@ -1,5 +1,6 @@
 import Foundation
 import Supabase
+import UIKit
 
 final class HelpZoneService {
     static let shared = HelpZoneService()
@@ -11,7 +12,24 @@ final class HelpZoneService {
         return "\(prefix)-\(suffix)"
     }
 
-    func createZone(zoneName: String, organizationName: String, idDocumentUrl: String? = nil) async throws -> HelpZone {
+    func createZone(zoneName: String, organizationName: String, idDocument: UIImage?) async throws -> HelpZone {
+        let documentData = idDocument?.jpegData(compressionQuality: 0.8)
+        return try await createZone(
+            zoneName: zoneName,
+            organizationName: organizationName,
+            idDocumentData: documentData,
+            idDocumentContentType: documentData == nil ? nil : "image/jpeg",
+            idDocumentFileExtension: documentData == nil ? nil : "jpg"
+        )
+    }
+
+    func createZone(
+        zoneName: String,
+        organizationName: String,
+        idDocumentData: Data?,
+        idDocumentContentType: String?,
+        idDocumentFileExtension: String?
+    ) async throws -> HelpZone {
         guard let userId = SupabaseManager.shared.client.auth.currentUser?.id
             ?? SupabaseManager.shared.client.auth.currentSession?.user.id else {
             throw NSError(domain: "HelpZoneService", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
@@ -34,6 +52,30 @@ final class HelpZoneService {
             .execute()
             .value
 
+        // Upload document and create verification submission if document is provided
+        if let idDocumentData,
+           let idDocumentContentType,
+           let idDocumentFileExtension {
+            let documentUrl = try await StorageService.shared.uploadZoneDocument(
+                data: idDocumentData,
+                fileName: "zone_\(response.id.uuidString)_verification",
+                contentType: idDocumentContentType,
+                fileExtension: idDocumentFileExtension
+            )
+
+            let submissionData: [String: AnyJSON] = [
+                "zone_id": .string(response.id.uuidString),
+                "submitted_by_user_id": .string(userId.uuidString),
+                "document_url": .string(documentUrl),
+                "status": .string("pending")
+            ]
+
+            _ = try await SupabaseManager.shared.client
+                .from("help_zone_verification_submissions")
+                .insert(submissionData)
+                .execute()
+        }
+
         return response
     }
 
@@ -49,6 +91,11 @@ final class HelpZoneService {
 
         guard let zone = zones.first else {
             throw NSError(domain: "HelpZoneService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Zone not found"])
+        }
+
+        // Prevent joining zones that are not approved
+        if zone.verificationStatus != .approved {
+            throw NSError(domain: "HelpZoneService", code: 403, userInfo: [NSLocalizedDescriptionKey: "Cannot join this zone — verification pending or rejected."])
         }
 
         guard let userId = SupabaseManager.shared.client.auth.currentUser?.id
@@ -95,11 +142,14 @@ final class HelpZoneService {
             .from("help_zones")
             .select()
             .in("id", values: zoneIds)
+            .eq("verification_status", value: "approved")
             .execute()
             .value
 
         return zones
     }
+
+       
 
     func fetchZoneOnlyRequests(zoneId: UUID) async throws -> [HelpRequest] {
         let response: [HelpRequest] = try await SupabaseManager.shared.client

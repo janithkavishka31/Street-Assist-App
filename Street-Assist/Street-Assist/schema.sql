@@ -171,6 +171,9 @@ create table public.help_requests (
   latitude          double precision    not null,
   longitude         double precision    not null,
   address_label     text,
+  requester_completed_at timestamptz,
+  payment_completed_at   timestamptz,
+  paid_amount            numeric(10,2),
   created_at        timestamptz         not null default now(),
   updated_at        timestamptz         not null default now()
 );
@@ -196,6 +199,17 @@ create table public.help_request_acceptances (
   canceled_at     timestamptz
 );
 
+-- Request ratings (used for 5-star bonus and leaderboard quality scoring)
+create table public.help_request_ratings (
+  id             uuid        primary key default uuid_generate_v4(),
+  request_id     uuid        not null unique references public.help_requests(id) on delete cascade,
+  rater_user_id  uuid        not null references public.users(id) on delete restrict,
+  rated_user_id  uuid        not null references public.users(id) on delete restrict,
+  score          int         not null check (score between 1 and 5),
+  comment        text,
+  created_at     timestamptz not null default now()
+);
+
 -- Points ledger (append-only audit trail)
 create table public.points_ledger (
   id          uuid                primary key default uuid_generate_v4(),
@@ -215,6 +229,43 @@ create table public.user_gamification (
   best_streak_days      int         not null default 0,
   last_assist_at        timestamptz,
   updated_at            timestamptz not null default now()
+);
+
+-- Per-mode streak tracking (helper/requester)
+create table public.user_mode_streaks (
+  id                        uuid                  primary key default uuid_generate_v4(),
+  user_id                   uuid                  not null references public.users(id) on delete cascade,
+  mode                      leaderboard_mode_enum not null,
+  current_streak_days       int                   not null default 0,
+  best_streak_days          int                   not null default 0,
+  last_checkin_date         date,
+  weekly_streak_completed_at timestamptz,
+  updated_at                timestamptz           not null default now(),
+  unique (user_id, mode)
+);
+
+-- Daily check-in log (one per user+mode+day)
+create table public.user_daily_checkins (
+  id             uuid                  primary key default uuid_generate_v4(),
+  user_id        uuid                  not null references public.users(id) on delete cascade,
+  mode           leaderboard_mode_enum not null,
+  check_in_date  date                  not null,
+  created_at     timestamptz           not null default now(),
+  unique (user_id, mode, check_in_date)
+);
+
+-- Reward vouchers (weekly top10 and gift box)
+create table public.discount_vouchers (
+  id               uuid                  primary key default uuid_generate_v4(),
+  user_id          uuid                  not null references public.users(id) on delete cascade,
+  mode             leaderboard_mode_enum not null,
+  source           text                  not null check (source in ('weekly_top10', 'gift_box')),
+  discount_percent int                   not null check (discount_percent in (5, 10, 20)),
+  valid_from       timestamptz           not null default now(),
+  valid_until      timestamptz           not null,
+  is_used          boolean               not null default false,
+  request_id       uuid                  references public.help_requests(id) on delete set null,
+  created_at       timestamptz           not null default now()
 );
 
 -- Weekly leaderboard entries
@@ -279,6 +330,10 @@ create trigger trg_user_gamification_updated_at
   before update on public.user_gamification
   for each row execute function public.set_updated_at();
 
+create trigger trg_user_mode_streaks_updated_at
+  before update on public.user_mode_streaks
+  for each row execute function public.set_updated_at();
+
 
 -- ------------------------------------------------------------
 -- 7. AUTH TRIGGER (links Supabase auth.users → public.users)
@@ -328,167 +383,195 @@ create trigger on_auth_user_created
 
 
 -- ------------------------------------------------------------
--- 8. ROW LEVEL SECURITY
+-- 7.5 LEADERBOARD REFRESH FUNCTION
 -- ------------------------------------------------------------
 
-alter table public.users                             enable row level security;
-alter table public.user_settings                     enable row level security;
-alter table public.user_skills                       enable row level security;
-alter table public.help_zones                        enable row level security;
-alter table public.help_zone_verification_submissions enable row level security;
-alter table public.zone_memberships                  enable row level security;
-alter table public.help_requests                     enable row level security;
-alter table public.help_request_photos               enable row level security;
-alter table public.help_request_acceptances          enable row level security;
-alter table public.points_ledger                     enable row level security;
-alter table public.user_gamification                 enable row level security;
-alter table public.leaderboard_weeks                 enable row level security;
-alter table public.leaderboard_entries               enable row level security;
-alter table public.skills                            enable row level security;
-alter table public.helper_locations                  enable row level security;
-
--- skills: public read
-create policy "skills_public_read" on public.skills
-  for select using (true);
-
--- users: read own row; others can read basic profile
-create policy "users_read_own" on public.users
-  for select using (auth.uid() = id);
-
-create policy "users_update_own" on public.users
-  for update using (auth.uid() = id);
-
--- user_settings: own only
-create policy "user_settings_own" on public.user_settings
-  for all using (auth.uid() = user_id);
-
--- user_skills: own only
-create policy "user_skills_own" on public.user_skills
-  for all using (auth.uid() = user_id);
-
--- help_zones: any authenticated user can read approved zones
-create policy "help_zones_read" on public.help_zones
-  for select using (auth.uid() is not null);
-
-create policy "help_zones_insert" on public.help_zones
-  for insert with check (auth.uid() = created_by_user_id);
-
-create policy "help_zones_update_creator" on public.help_zones
-  for update using (auth.uid() = created_by_user_id);
-
--- zone_memberships: members can read their own membership rows
-create policy "zone_memberships_read" on public.zone_memberships
-  for select using (
-    auth.uid() = user_id
+create or replace function public.refresh_weekly_leaderboard_entries(p_week_start_date date default null)
+returns void language plpgsql as $$
+declare
+  v_week_start date := coalesce(
+    p_week_start_date,
+    (date_trunc('week', (now() at time zone 'utc') + interval '1 day') - interval '1 day')::date
   );
+  v_week_end date := v_week_start + interval '7 days';
+  v_week_id uuid;
+begin
+  insert into public.leaderboard_weeks (week_start_date)
+  values (v_week_start)
+  on conflict (week_start_date) do nothing;
 
-create policy "zone_memberships_insert_self" on public.zone_memberships
-  for insert with check (auth.uid() = user_id);
+  select lw.id into v_week_id
+  from public.leaderboard_weeks lw
+  where lw.week_start_date = v_week_start;
 
-create policy "zone_memberships_update_own" on public.zone_memberships
-  for update using (auth.uid() = user_id);
+  delete from public.leaderboard_entries le
+  where le.leaderboard_week_id = v_week_id
+    and le.mode in ('helper', 'requester');
 
--- verification submissions: only submitter and zone creator can see
-create policy "zone_submissions_read" on public.help_zone_verification_submissions
-  for select using (
-    auth.uid() = submitted_by_user_id or
-    exists (
-      select 1 from public.help_zones hz
-      where hz.id = zone_id and hz.created_by_user_id = auth.uid()
-    )
-  );
+  -- Helper mode points
+  with helper_completed as (
+    select
+      ha.helper_user_id as user_id,
+      count(*)::int as completed_count
+    from public.help_request_acceptances ha
+    where ha.completed_at >= v_week_start
+      and ha.completed_at < v_week_end
+    group by ha.helper_user_id
+  ),
+  helper_five_star as (
+    select
+      hr.rated_user_id as user_id,
+      count(*) filter (where hr.score = 5)::int as five_star_count,
+      avg(hr.score)::numeric as avg_rating
+    from public.help_request_ratings hr
+    where hr.created_at >= v_week_start
+      and hr.created_at < v_week_end
+    group by hr.rated_user_id
+  ),
+  helper_checkins as (
+    select
+      dc.user_id,
+      count(*)::int as checkin_count
+    from public.user_daily_checkins dc
+    where dc.mode = 'helper'
+      and dc.check_in_date >= v_week_start
+      and dc.check_in_date < v_week_end
+    group by dc.user_id
+  ),
+  helper_scores as (
+    select
+      u.id as user_id,
+      coalesce(hc.completed_count, 0) * 10
+      + coalesce(hf.five_star_count, 0) * 5
+      + coalesce(hk.checkin_count, 0) * 5 as points,
+      hf.avg_rating
+    from public.users u
+    left join helper_completed hc on hc.user_id = u.id
+    left join helper_five_star hf on hf.user_id = u.id
+    left join helper_checkins hk on hk.user_id = u.id
+  ),
+  helper_ranked as (
+    select
+      hs.user_id,
+      hs.points,
+      dense_rank() over (order by hs.points desc, hs.avg_rating desc nulls last, hs.user_id) as rank
+    from helper_scores hs
+    where hs.points > 0
+  )
+  insert into public.leaderboard_entries (id, leaderboard_week_id, mode, user_id, points, rank, title_label)
+  select
+    uuid_generate_v4(),
+    v_week_id,
+    'helper'::leaderboard_mode_enum,
+    hr.user_id,
+    hr.points,
+    hr.rank,
+    case hr.rank
+      when 1 then 'Platinum Helper'
+      when 2 then 'Elite Guardian'
+      when 3 then 'Steady Pulse'
+      else null
+    end
+  from helper_ranked hr;
 
-create policy "zone_submissions_insert" on public.help_zone_verification_submissions
-  for insert with check (auth.uid() = submitted_by_user_id);
-
--- help_requests: open/global visible to all helpers; zone-scoped visible to zone members
-create policy "help_requests_read" on public.help_requests
-  for select using (
-    auth.uid() is not null and (
-      scope = 'help_zone_and_global' or
-      auth.uid() = requester_user_id or
-      exists (
-        select 1 from public.zone_memberships zm
-        where zm.zone_id = help_requests.zone_id
-          and zm.user_id = auth.uid()
-          and zm.status = 'active'
-      )
-    )
-  );
-
-create policy "help_requests_insert" on public.help_requests
-  for insert with check (auth.uid() = requester_user_id);
-
-create policy "help_requests_update_own" on public.help_requests
-  for update using (auth.uid() = requester_user_id);
-
--- help_request_photos: same visibility as the parent request
-create policy "help_request_photos_read" on public.help_request_photos
-  for select using (
-    exists (
-      select 1 from public.help_requests hr
-      where hr.id = request_id and (
-        hr.scope = 'help_zone_and_global' or
-        hr.requester_user_id = auth.uid()
-      )
-    )
-  );
-
-create policy "help_request_photos_insert" on public.help_request_photos
-  for insert with check (
-    exists (
-      select 1 from public.help_requests hr
-      where hr.id = request_id and hr.requester_user_id = auth.uid()
-    )
-  );
-
--- help_request_acceptances
-create policy "acceptances_read" on public.help_request_acceptances
-  for select using (
-    auth.uid() = helper_user_id or
-    exists (
-      select 1 from public.help_requests hr
-      where hr.id = request_id and hr.requester_user_id = auth.uid()
-    )
-  );
-
-create policy "acceptances_insert" on public.help_request_acceptances
-  for insert with check (auth.uid() = helper_user_id);
-
-create policy "acceptances_update_helper" on public.help_request_acceptances
-  for update using (auth.uid() = helper_user_id);
-
--- points_ledger: read own only
-create policy "points_ledger_read_own" on public.points_ledger
-  for select using (auth.uid() = user_id);
-
--- user_gamification: read own; leaderboard read all
-create policy "gamification_read_own" on public.user_gamification
-  for select using (auth.uid() = user_id);
-
--- leaderboard: public read for authenticated users
-create policy "leaderboard_weeks_read" on public.leaderboard_weeks
-  for select using (auth.uid() is not null);
-
-create policy "leaderboard_entries_read" on public.leaderboard_entries
-  for select using (auth.uid() is not null);
-
--- helper_locations: own read/write; others can read for nearby helper discovery
-create policy "helper_locations_read_own" on public.helper_locations
-  for select using (auth.uid() = user_id);
-
-create policy "helper_locations_read_others" on public.helper_locations
-  for select using (auth.uid() is not null);
-
-create policy "helper_locations_insert" on public.helper_locations
-  for insert with check (auth.uid() = user_id);
-
-create policy "helper_locations_update_own" on public.helper_locations
-  for update using (auth.uid() = user_id);
+  -- Requester mode points
+  with requester_completed as (
+    select
+      hr.requester_user_id as user_id,
+      count(*)::int as completed_count
+    from public.help_requests hr
+    where hr.status = 'completed'
+      and hr.updated_at >= v_week_start
+      and hr.updated_at < v_week_end
+    group by hr.requester_user_id
+  ),
+  requester_five_star as (
+    select
+      rr.rated_user_id as user_id,
+      count(*) filter (where rr.score = 5)::int as five_star_count,
+      avg(rr.score)::numeric as avg_rating
+    from public.help_request_ratings rr
+    where rr.created_at >= v_week_start
+      and rr.created_at < v_week_end
+    group by rr.rated_user_id
+  ),
+  requester_checkins as (
+    select
+      dc.user_id,
+      count(*)::int as checkin_count
+    from public.user_daily_checkins dc
+    where dc.mode = 'requester'
+      and dc.check_in_date >= v_week_start
+      and dc.check_in_date < v_week_end
+    group by dc.user_id
+  ),
+  requester_scores as (
+    select
+      u.id as user_id,
+      coalesce(rc.completed_count, 0) * 10
+      + coalesce(rf.five_star_count, 0) * 5
+      + coalesce(rk.checkin_count, 0) * 5 as points,
+      rf.avg_rating
+    from public.users u
+    left join requester_completed rc on rc.user_id = u.id
+    left join requester_five_star rf on rf.user_id = u.id
+    left join requester_checkins rk on rk.user_id = u.id
+  ),
+  requester_ranked as (
+    select
+      rs.user_id,
+      rs.points,
+      dense_rank() over (order by rs.points desc, rs.avg_rating desc nulls last, rs.user_id) as rank
+    from requester_scores rs
+    where rs.points > 0
+  )
+  insert into public.leaderboard_entries (id, leaderboard_week_id, mode, user_id, points, rank, title_label)
+  select
+    uuid_generate_v4(),
+    v_week_id,
+    'requester'::leaderboard_mode_enum,
+    rr.user_id,
+    rr.points,
+    rr.rank,
+    case rr.rank
+      when 1 then 'Platinum Requester'
+      when 2 then 'Community Catalyst'
+      when 3 then 'Steady Supporter'
+      else null
+    end
+  from requester_ranked rr;
+end;
+$$;
 
 
 -- ------------------------------------------------------------
--- 9. INDEXES
+-- 8. DEMO MODE ACCESS (RLS OFF)
+-- ------------------------------------------------------------
+
+-- University demo mode: disable RLS on app tables and storage objects.
+alter table public.users                             disable row level security;
+alter table public.user_settings                     disable row level security;
+alter table public.user_skills                       disable row level security;
+alter table public.help_zones                        disable row level security;
+alter table public.help_zone_verification_submissions disable row level security;
+alter table public.zone_memberships                  disable row level security;
+alter table public.help_requests                     disable row level security;
+alter table public.help_request_photos               disable row level security;
+alter table public.help_request_acceptances          disable row level security;
+alter table public.help_request_ratings              disable row level security;
+alter table public.points_ledger                     disable row level security;
+alter table public.user_gamification                 disable row level security;
+alter table public.user_mode_streaks                 disable row level security;
+alter table public.user_daily_checkins               disable row level security;
+alter table public.discount_vouchers                 disable row level security;
+alter table public.leaderboard_weeks                 disable row level security;
+alter table public.leaderboard_entries               disable row level security;
+alter table public.skills                            disable row level security;
+alter table public.helper_locations                  disable row level security;
+
+
+-- ------------------------------------------------------------
+-- 10. INDEXES
 -- ------------------------------------------------------------
 
 -- Geo index for map-based request queries
@@ -522,6 +605,49 @@ create index idx_leaderboard_entries_week_mode
 create index idx_points_ledger_user
   on public.points_ledger (user_id, created_at desc);
 
+-- Gamification summary lookup
+create index idx_user_gamification_points
+  on public.user_gamification (total_points desc);
+
+-- Mode streak lookups
+create index idx_user_mode_streaks_user_mode
+  on public.user_mode_streaks (user_id, mode);
+
+-- Daily check-in lookups
+create index idx_user_daily_checkins_user_mode_date
+  on public.user_daily_checkins (user_id, mode, check_in_date desc);
+
+-- Voucher lookups
+create index idx_discount_vouchers_user_mode_valid
+  on public.discount_vouchers (user_id, mode, is_used, valid_until desc);
+
 -- Request photos ordering
 create index idx_help_request_photos_request
   on public.help_request_photos (request_id, sort_order);
+
+-- Ratings lookup
+create index idx_help_request_ratings_rated_user
+  on public.help_request_ratings (rated_user_id, created_at desc);
+
+create index idx_help_request_ratings_rater
+  on public.help_request_ratings (rater_user_id);
+
+create index idx_help_request_ratings_request
+  on public.help_request_ratings (request_id);
+
+
+-- ------------------------------------------------------------
+-- 11. COMPATIBILITY PATCHES FOR EXISTING PROJECTS
+-- ------------------------------------------------------------
+-- Safe to run on existing DBs when app fields evolve.
+alter table if exists public.help_requests
+  add column if not exists requester_completed_at timestamptz,
+  add column if not exists payment_completed_at timestamptz,
+  add column if not exists paid_amount numeric(10,2);
+
+alter table if exists public.help_request_acceptances
+  add column if not exists completed_at timestamptz,
+  add column if not exists canceled_at timestamptz;
+
+-- Refresh PostgREST schema cache so new columns are discoverable immediately.
+notify pgrst, 'reload schema';

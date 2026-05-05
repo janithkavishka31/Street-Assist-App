@@ -1,5 +1,5 @@
-import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct CreateHelpZoneSheetView: View {
     @Binding var isPresented: Bool
@@ -7,8 +7,12 @@ struct CreateHelpZoneSheetView: View {
     @State private var zoneName: String = ""
     @State private var organizationName: String = ""
 
-    @State private var pickerItem: PhotosPickerItem?
-    @State private var selectedIDImage: UIImage?
+    @State private var isPresentingDocumentImporter = false
+    @State private var selectedIDDocumentData: Data?
+    @State private var selectedIDDocumentFileName: String = ""
+    @State private var selectedIDDocumentContentType: String = ""
+    @State private var selectedIDDocumentFileExtension: String = ""
+    @State private var selectedIDPreviewImage: UIImage?
 
     var body: some View {
         ZStack {
@@ -54,15 +58,34 @@ struct CreateHelpZoneSheetView: View {
             }
             .padding(.bottom, 10)
         }
-        .onChange(of: pickerItem) { newItem in
-            guard let newItem else { return }
-            Task {
-                if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let image = UIImage(data: data) {
-                    selectedIDImage = image
-                }
+        .fileImporter(
+            isPresented: $isPresentingDocumentImporter,
+            allowedContentTypes: [.pdf, .image],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                loadSelectedDocument(from: url)
+            case .failure:
+                break
             }
         }
+        .alert(
+            "Create Zone Failed",
+            isPresented: Binding(
+                get: { submitErrorMessage != nil },
+                set: { if !$0 { submitErrorMessage = nil } }
+            ),
+            actions: {
+                Button("OK", role: .cancel) {
+                    submitErrorMessage = nil
+                }
+            },
+            message: {
+                Text(submitErrorMessage ?? "Unknown error")
+            }
+        )
     }
 
     private var header: some View {
@@ -122,7 +145,9 @@ struct CreateHelpZoneSheetView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(AppTheme.textPrimary)
 
-            PhotosPicker(selection: $pickerItem, matching: .images) {
+            Button {
+                isPresentingDocumentImporter = true
+            } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous)
                         .fill(Color.white.opacity(0.0))
@@ -157,24 +182,56 @@ struct CreateHelpZoneSheetView: View {
             }
             .buttonStyle(.plain)
 
-            if let selectedIDImage {
+            if let selectedIDPreviewImage {
                 HStack(spacing: 12) {
-                    Image(uiImage: selectedIDImage)
+                    Image(uiImage: selectedIDPreviewImage)
                         .resizable()
                         .scaledToFill()
                         .frame(width: 54, height: 54)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                    Text("ID selected")
+                    Text(selectedIDDocumentFileName.isEmpty ? "Document selected" : selectedIDDocumentFileName)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AppTheme.textPrimary)
 
                     Spacer()
 
                     Button {
-                        self.selectedIDImage = nil
-                        self.pickerItem = nil
+                        clearSelectedDocument()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .frame(width: 30, height: 30)
+                            .background(AppTheme.subtleButtonBackground)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(12)
+                .background(AppTheme.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: AppTheme.shadow, radius: 12, x: 0, y: 8)
+            } else if selectedIDDocumentData != nil {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(AppTheme.categoryBlueBackground)
+                        Image(systemName: "doc.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(AppTheme.primaryBlue)
+                    }
+                    .frame(width: 54, height: 54)
+
+                    Text(selectedIDDocumentFileName.isEmpty ? "Document selected" : selectedIDDocumentFileName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+
+                    Spacer()
+
+                    Button {
+                        clearSelectedDocument()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .bold))
@@ -245,7 +302,7 @@ struct CreateHelpZoneSheetView: View {
         .buttonStyle(.plain)
         .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 12)
         .padding(.top, 6)
-        .disabled(isSubmitting || zoneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || organizationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .disabled(isSubmitting || zoneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || organizationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedIDDocumentData == nil)
         .alert(item: $createdZone) { zone in
             Alert(title: Text("Zone Created"), message: Text("Join code: \(zone.joinCode)"), dismissButton: .default(Text("OK")) {
                 isPresented = false
@@ -255,12 +312,19 @@ struct CreateHelpZoneSheetView: View {
 
     @State private var isSubmitting = false
     @State private var createdZone: HelpZone?
+    @State private var submitErrorMessage: String?
 
     private func submitCreate() {
         isSubmitting = true
         Task {
             do {
-                let zone = try await HelpZoneService.shared.createZone(zoneName: zoneName, organizationName: organizationName)
+                let zone = try await HelpZoneService.shared.createZone(
+                    zoneName: zoneName,
+                    organizationName: organizationName,
+                    idDocumentData: selectedIDDocumentData,
+                    idDocumentContentType: selectedIDDocumentContentType,
+                    idDocumentFileExtension: selectedIDDocumentFileExtension
+                )
                 DispatchQueue.main.async {
                     createdZone = zone
                     isSubmitting = false
@@ -268,11 +332,41 @@ struct CreateHelpZoneSheetView: View {
             } catch {
                 DispatchQueue.main.async {
                     isSubmitting = false
-                    // Could show error toast — for now close sheet
-                    isPresented = false
+                    submitErrorMessage = error.localizedDescription
                 }
             }
         }
+    }
+
+    private func loadSelectedDocument(from url: URL) {
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let data = try? Data(contentsOf: url) else {
+            clearSelectedDocument()
+            return
+        }
+
+        let fileExtension = url.pathExtension.lowercased().isEmpty ? "bin" : url.pathExtension.lowercased()
+        let contentType = UTType(filenameExtension: fileExtension)?.preferredMIMEType ?? (fileExtension == "pdf" ? "application/pdf" : "application/octet-stream")
+
+        selectedIDDocumentData = data
+        selectedIDDocumentFileName = url.lastPathComponent
+        selectedIDDocumentContentType = contentType
+        selectedIDDocumentFileExtension = fileExtension
+        selectedIDPreviewImage = UIImage(data: data)
+    }
+
+    private func clearSelectedDocument() {
+        selectedIDDocumentData = nil
+        selectedIDDocumentFileName = ""
+        selectedIDDocumentContentType = ""
+        selectedIDDocumentFileExtension = ""
+        selectedIDPreviewImage = nil
     }
 }
 
