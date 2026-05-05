@@ -65,7 +65,7 @@ final class RankingsService {
         let canClaimTopTenVoucher = weeklyEntries.contains(where: { $0.highlight && $0.rank <= 10 })
             && activeVoucher?.source != "weekly_top10"
 
-        return RankingsDashboard(
+        let dashboard = RankingsDashboard(
             totalPoints: totalPoints,
             currentStreakDays: streak?.currentStreakDays ?? 0,
             bestStreakDays: streak?.bestStreakDays ?? 0,
@@ -73,6 +73,14 @@ final class RankingsService {
             activeVoucher: activeVoucher,
             canClaimTopTenVoucher: canClaimTopTenVoucher
         )
+
+        WidgetSyncService.saveSnapshot(
+            totalPoints: dashboard.totalPoints,
+            streakDays: dashboard.currentStreakDays,
+            modeRawValue: mode.rawValue
+        )
+
+        return dashboard
     }
 
     func claimTopTenVoucher(mode: LeaderboardMode) async throws -> DiscountVoucher {

@@ -43,24 +43,14 @@ struct SimpleEntry: TimelineEntry {
 
 struct street_assistEntryView : View {
     var entry: Provider.Entry
-    @Environment(\.levelOfDetail) var levelOfDetail: LevelOfDetail
 
     var body: some View {
-        switch levelOfDetail {
-        case .simplified:
-            VStack {
-                Text(entry.date, style: .time)
+        VStack {
+            Text("Time:")
+            Text(entry.date, style: .time)
 
-                Text(entry.configuration.favoriteEmoji)
-            }
-        default:
-            VStack {
-                Text("Time:")
-                Text(entry.date, style: .time)
-
-                Text("Favorite Emoji:")
-                Text(entry.configuration.favoriteEmoji)
-            }
+            Text("Favorite Emoji:")
+            Text(entry.configuration.favoriteEmoji)
         }
     }
 }
@@ -71,11 +61,8 @@ struct street_assist: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: ConfigurationAppIntent.self, provider: Provider()) { entry in
             street_assistEntryView(entry: entry)
-                .containerBackground(.white.gradient, for: .widget)
+                .containerBackground(.fill.tertiary, for: .widget)
         }
-        .supportedFamilies([.systemSmall])
-        .supportedMountingStyles([.elevated])
-        .widgetTexture(.paper)
     }
 }
 
@@ -91,4 +78,11 @@ extension ConfigurationAppIntent {
         intent.favoriteEmoji = "🤩"
         return intent
     }
+}
+
+#Preview(as: .systemSmall) {
+    street_assist()
+} timeline: {
+    SimpleEntry(date: .now, configuration: .smiley)
+    SimpleEntry(date: .now, configuration: .starEyes)
 }
