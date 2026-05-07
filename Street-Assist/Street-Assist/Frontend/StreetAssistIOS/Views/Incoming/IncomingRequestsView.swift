@@ -1,6 +1,7 @@
 import Combine
 import CoreLocation
 import MapKit
+import Supabase
 import SwiftUI
 
 struct IncomingRequestsView: View {
@@ -24,6 +25,12 @@ struct IncomingRequestsView: View {
     @State private var selectedRequest: IncomingRequest?
     @State private var selectedViewRequest: IncomingRequest? // For "View" modal
     @State private var acceptedRequestIds: Set<UUID> = [] // Track which requests are accepted
+    @State private var activeAcceptedRequestId: UUID?
+    @State private var joinedZoneIDs: Set<UUID> = []
+    @State private var helperTotalPoints: Int = 0
+    @State private var helperTodayPoints: Int = 0
+    @State private var helperWeeklyAssists: Int = 0
+    @State private var helperCurrentStreak: Int = 0
 
     @StateObject private var locationManager = IncomingLocationManager()
     @State private var loadRequestsTask: Task<Void, Never>?
@@ -57,11 +64,13 @@ struct IncomingRequestsView: View {
             }
             locationManager.requestAccess()
             triggerLoadIncomingRequests()
+            Task { await loadHelperStats() }
         }
         .onChange(of: session.isHelperEnabled) { enabled in
             if enabled {
                 isShowingHelperModeSheet = false
                 triggerLoadIncomingRequests()
+                Task { await loadHelperStats() }
             } else {
                 isShowingHelperModeSheet = true
                 requests = []
@@ -76,6 +85,7 @@ struct IncomingRequestsView: View {
         }
         .refreshable {
             await loadIncomingRequests()
+            await loadHelperStats()
         }
         .onDisappear {
             loadRequestsTask?.cancel()
@@ -182,11 +192,11 @@ struct IncomingRequestsView: View {
                 .foregroundStyle(AppTheme.textSecondary)
 
             HStack(alignment: .lastTextBaseline, spacing: 10) {
-                Text("1,450")
+                Text("\(helperTotalPoints)")
                     .font(.system(size: 34, weight: .bold))
                     .foregroundStyle(AppTheme.primaryBlue)
 
-                Text("+120 today")
+                Text("+\(helperTodayPoints) today")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(AppTheme.liveGreen)
 
@@ -201,8 +211,13 @@ struct IncomingRequestsView: View {
 
     private var smallStatsRow: some View {
         HStack(spacing: 12) {
-            smallStatCard(title: "Weekly Assists", value: "12")
-            smallStatCard(title: "Current Streak", value: "6 Days", valueColor: AppTheme.categoryOrange, trailingIcon: "flame.fill")
+            smallStatCard(title: "Weekly Assists", value: "\(helperWeeklyAssists)")
+            smallStatCard(
+                title: "Current Streak",
+                value: "\(helperCurrentStreak) Days",
+                valueColor: AppTheme.categoryOrange,
+                trailingIcon: "flame.fill"
+            )
         }
     }
 
@@ -294,12 +309,28 @@ struct IncomingRequestsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
             } else {
                 VStack(spacing: 14) {
+                    if activeAcceptedRequestId != nil {
+                        Text("Finish your current accepted request before accepting another one.")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(AppTheme.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+
                     ForEach(requests) { request in
                         let isAccepted = acceptedRequestIds.contains(request.requestId)
+                        let isDisabledForNewAccept =
+                            activeAcceptedRequestId != nil
+                            && !isAccepted
+                            && request.requestId != activeAcceptedRequestId
                         IncomingRequestCardView(
                             request: request,
                             isAccepted: isAccepted,
+                            isDisabled: isDisabledForNewAccept,
                             onTap: {
+                                guard !isDisabledForNewAccept else { return }
                                 if isAccepted {
                                     selectedViewRequest = request
                                 } else {
@@ -343,14 +374,44 @@ struct IncomingRequestsView: View {
         defer { isLoadingRequests = false }
 
         do {
+            let auth = SupabaseManager.shared.client.auth
+            let currentUserID = auth.currentUser?.id ?? auth.currentSession?.user.id
+
             if !didLoadSkills {
                 helperSkillKeys = try await HelpRequestService.shared.fetchCurrentUserSkillKeys()
                 didLoadSkills = true
             }
 
-            let fetched = try await HelpRequestService.shared.fetchOpenRequests()
+            joinedZoneIDs = try await HelpZoneService.shared.fetchJoinedZoneIDsForCurrentUser()
+
+            let openRequests = try await HelpRequestService.shared.fetchOpenRequests()
+            let acceptedByCurrentHelper = try await HelpRequestService.shared.fetchAcceptedRequestsForCurrentHelper()
+            let acceptances = try await HelpRequestService.shared.fetchAcceptancesForCurrentUser()
+            let activeAcceptances = acceptances
+                .filter { $0.completedAt == nil && $0.canceledAt == nil }
+                .sorted { $0.acceptedAt < $1.acceptedAt }
+            let activeAcceptedRequestIDs = Set(activeAcceptances.map(\.requestId))
+
+            acceptedRequestIds = activeAcceptedRequestIDs
+            activeAcceptedRequestId = activeAcceptances.first?.requestId
+
+            let fetched = Dictionary(uniqueKeysWithValues: (openRequests + acceptedByCurrentHelper).map { ($0.id, $0) })
+                .map(\.value)
 
             let filtered = fetched
+                .filter { request in
+                    guard request.status == .accepted else { return true }
+                    return activeAcceptedRequestIDs.contains(request.id)
+                }
+                .filter { request in
+                    guard let currentUserID else { return true }
+                    return request.requesterUserId != currentUserID
+                }
+                .filter { request in
+                    guard request.scope == .helpZoneOnly else { return true }
+                    guard let zoneID = request.zoneId else { return false }
+                    return joinedZoneIDs.contains(zoneID)
+                }
                 .filter { request in
                     helperSkillKeys.contains(skillKey(for: request.category))
                 }
@@ -371,6 +432,7 @@ struct IncomingRequestsView: View {
 
                     return IncomingRequest(
                         requestId: request.id,
+                        requesterUserId: request.requesterUserId,
                         category: categoryText(for: request.category),
                         categoryStyle: categoryStyle(for: request.category),
                         timeAgo: relativeTime(from: request.createdAt),
@@ -381,14 +443,22 @@ struct IncomingRequestsView: View {
                             longitude: request.longitude
                         ),
                         title: titleText(for: request),
-                        subtitle: subtitleText(for: request)
+                        subtitle: subtitleText(for: request),
+                        fullDescription: request.description
                     )
                 }
-                .sorted { $0.timeSortValue > $1.timeSortValue }
+                .sorted { lhs, rhs in
+                    let lhsIsActive = lhs.requestId == activeAcceptedRequestId
+                    let rhsIsActive = rhs.requestId == activeAcceptedRequestId
 
-            // fetch acceptances once and mark accepted request ids
-            let acceptances = try await HelpRequestService.shared.fetchAcceptancesForCurrentUser()
-            acceptedRequestIds = Set(acceptances.map { $0.requestId })
+                    if lhsIsActive != rhsIsActive {
+                        return lhsIsActive
+                    }
+
+                    return lhs.timeSortValue > rhs.timeSortValue
+                }
+
+            await notifyAboutNewRequestsIfNeeded(filtered)
 
             requests = filtered
         } catch is CancellationError {
@@ -403,6 +473,44 @@ struct IncomingRequestsView: View {
         loadRequestsTask?.cancel()
         loadRequestsTask = Task {
             await loadIncomingRequests()
+        }
+    }
+
+    private func loadHelperStats() async {
+        do {
+            let stats = try await HelpRequestService.shared.fetchHelperDashboardStats()
+            helperTotalPoints = stats.totalPoints
+            helperTodayPoints = stats.todayPoints
+            helperWeeklyAssists = stats.weeklyAssists
+            helperCurrentStreak = stats.currentStreakDays
+        } catch {
+            helperTotalPoints = 0
+            helperTodayPoints = 0
+            helperWeeklyAssists = 0
+            helperCurrentStreak = 0
+            print("Failed to load helper stats: \(error.localizedDescription)")
+        }
+    }
+
+    private func notifyAboutNewRequestsIfNeeded(_ latestRequests: [IncomingRequest]) async {
+        let latestIDs = Set(latestRequests.map(\.requestId))
+        let currentIDs = Set(requests.map(\.requestId))
+        let newIDs = currentIDs.isEmpty ? latestIDs : latestIDs.subtracting(currentIDs)
+        guard !newIDs.isEmpty else {
+            return
+        }
+
+        let newRequests = latestRequests.filter { newIDs.contains($0.requestId) }
+        for request in newRequests {
+            var body = request.subtitle
+            if let distance = request.distance {
+                body += " • \(distance)"
+            }
+            await LocalNotificationService.shared.notifyNewRequestIfNeeded(
+                requestId: request.requestId,
+                title: "New \(request.category) request nearby",
+                body: body
+            )
         }
     }
 
@@ -514,6 +622,7 @@ private struct IncomingRequest: Identifiable {
     let id = UUID()
 
     let requestId: UUID
+    let requesterUserId: UUID
 
     let category: String
     let categoryStyle: TagStyle
@@ -529,6 +638,7 @@ private struct IncomingRequest: Identifiable {
 
     let title: String
     let subtitle: String
+    let fullDescription: String
 }
 
 private final class IncomingLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -601,6 +711,7 @@ private final class IncomingLocationManager: NSObject, ObservableObject, CLLocat
 private struct IncomingRequestCardView: View {
     let request: IncomingRequest
     let isAccepted: Bool
+    let isDisabled: Bool
     let onTap: () -> Void
 
     var body: some View {
@@ -646,19 +757,29 @@ private struct IncomingRequestCardView: View {
             } label: {
                 Text(isAccepted ? "View" : "Accept")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isDisabled ? AppTheme.textSecondary : .white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(isAccepted ? AppTheme.categoryGreen : AppTheme.primaryBlue)
+                    .background(
+                        isDisabled
+                            ? AppTheme.cardBackground
+                            : (isAccepted ? AppTheme.categoryGreen : AppTheme.primaryBlue)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(isDisabled ? AppTheme.border : .clear, lineWidth: 1)
+                    )
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(isDisabled)
             .shadow(color: AppTheme.shadow, radius: 14, x: 0, y: 10)
         }
         .padding(16)
         .background(AppTheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
         .shadow(color: AppTheme.shadow, radius: 18, x: 0, y: 12)
+        .opacity(isDisabled ? 0.55 : 1.0)
     }
 }
 
@@ -685,71 +806,59 @@ private struct IncomingRequestDetailSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isAccepting = false
     @State private var acceptanceError: String?
+    @State private var requesterPreview: HelpRequestService.RequesterPreview?
+    @State private var photoURLs: [String] = []
+    @State private var isLoadingAssets = false
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 12) {
             headerRow
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text(request.title)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(AppTheme.textPrimary)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    infoCard
+                    requesterCard
+                    photosCard
+                    mapCard
 
-                Text(request.subtitle)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppTheme.textSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let helperCoordinate {
-                RouteMapView(
-                    helperCoordinate: helperCoordinate,
-                    requesterCoordinate: request.requesterCoordinate
-                )
-                .frame(height: 320)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            } else {
-                Text("Waiting for location access...")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppTheme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(AppTheme.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
-            }
-
-            if let error = acceptanceError {
-                Text(error)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppTheme.categoryGreen)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(Color.red.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+                    if let error = acceptanceError {
+                        Text(error)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(AppTheme.categoryGreen)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+                    }
+                }
             }
 
             Button {
                 acceptRequest()
             } label: {
-                if isAccepting {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    Text("Accept Request")
+                HStack {
+                    if isAccepting {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(isAccepting ? "Accepting..." : "Accept Request")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 17)
+                .background(AppTheme.primaryBlue)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
-            .background(AppTheme.primaryBlue)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .buttonStyle(.plain)
             .disabled(isAccepting)
             .shadow(color: AppTheme.shadow, radius: 14, x: 0, y: 10)
         }
         .padding(20)
         .background(AppTheme.screenBackground)
+        .task {
+            await loadRequestAssets()
+        }
     }
 
     private func acceptRequest() {
@@ -775,6 +884,9 @@ private struct IncomingRequestDetailSheetView: View {
     private var headerRow: some View {
         HStack {
             TagPill(text: request.category, style: request.categoryStyle)
+            Text(request.timeAgo)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(AppTheme.textSecondary)
 
             Spacer()
 
@@ -789,6 +901,155 @@ private struct IncomingRequestDetailSheetView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(request.title)
+                .font(.system(size: 25, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text(request.fullDescription)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+    }
+
+    private var requesterCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Requester")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if isLoadingAssets && requesterPreview == nil {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let requesterPreview {
+                Text(requesterPreview.fullName)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                if let phone = requesterPreview.phone, !phone.isEmpty {
+                    Text(phone)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                if let bio = requesterPreview.quickBio, !bio.isEmpty {
+                    Text(bio)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(2)
+                }
+            } else {
+                Text("Requester details unavailable.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+    }
+
+    private var photosCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Requester Photos")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if !photoURLs.isEmpty {
+                    Text("\(photoURLs.count)")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(AppTheme.primaryBlue)
+                }
+            }
+
+            if isLoadingAssets && photoURLs.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if photoURLs.isEmpty {
+                Text("No photos were attached to this request.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(photoURLs, id: \.self) { url in
+                            AsyncImage(url: URL(string: url)) { phase in
+                                switch phase {
+                                case let .success(image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                case .failure:
+                                    ZStack {
+                                        Color.black.opacity(0.06)
+                                        Image(systemName: "photo")
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                case .empty:
+                                    ZStack {
+                                        Color.black.opacity(0.04)
+                                        ProgressView()
+                                    }
+                                @unknown default:
+                                    Color.black.opacity(0.04)
+                                }
+                            }
+                            .frame(width: 170, height: 120)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var mapCard: some View {
+        if let helperCoordinate {
+            RouteMapView(
+                helperCoordinate: helperCoordinate,
+                requesterCoordinate: request.requesterCoordinate
+            )
+            .frame(height: 260)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        } else {
+            Text("Waiting for location access...")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(AppTheme.cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+        }
+    }
+
+    @MainActor
+    private func loadRequestAssets() async {
+        isLoadingAssets = true
+        defer { isLoadingAssets = false }
+        do {
+            async let previewTask = HelpRequestService.shared.fetchRequesterPreview(userId: request.requesterUserId)
+            async let photosTask = HelpRequestService.shared.fetchRequestPhotos(requestId: request.requestId)
+            let (preview, photos) = try await (previewTask, photosTask)
+            requesterPreview = preview
+            photoURLs = photos.map(\.photoUrl)
+        } catch {
+            requesterPreview = nil
+            photoURLs = []
         }
     }
 }
@@ -874,58 +1135,59 @@ private struct ViewAcceptedRequestView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isCompletingTask = false
     @State private var taskCompletionMessage: String?
+    @State private var requesterPreview: HelpRequestService.RequesterPreview?
+    @State private var photoURLs: [String] = []
+    @State private var isLoadingAssets = false
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                VStack(spacing: 14) {
-                    headerRow
+        VStack(spacing: 12) {
+            headerRow
 
-                    RouteMapView(
-                        helperCoordinate: helperCoordinate,
-                        requesterCoordinate: requesterCoordinate
-                    )
-                    .frame(height: 400)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .padding(20)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    infoCard
+                    requesterCard
+                    photosCard
+                    mapCard
 
                     if let taskCompletionMessage {
                         Text(taskCompletionMessage)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(AppTheme.textSecondary)
-                            .padding(.horizontal, 20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(AppTheme.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
                     }
-
-                    Button {
-                        markTaskCompleted()
-                    } label: {
-                        if isCompletingTask {
-                            ProgressView()
-                                .tint(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(AppTheme.primaryBlue)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        } else {
-                            Text("Mark Task as Completed")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(AppTheme.primaryBlue)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 20)
-                    .disabled(isCompletingTask)
                 }
-                .background(AppTheme.screenBackground)
-
-                Spacer()
             }
+
+            Button {
+                markTaskCompleted()
+            } label: {
+                HStack {
+                    if isCompletingTask {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(isCompletingTask ? "Updating..." : "Mark Task as Completed")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(AppTheme.primaryBlue)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isCompletingTask)
+            .shadow(color: AppTheme.shadow, radius: 14, x: 0, y: 10)
         }
-        .ignoresSafeArea(edges: .bottom)
+        .padding(20)
+        .background(AppTheme.screenBackground)
+        .task {
+            await loadRequestAssets()
+        }
     }
 
     private var headerRow: some View {
@@ -958,6 +1220,132 @@ private struct ViewAcceptedRequestView: View {
         .padding(.top, 20)
     }
 
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                TagPill(text: request.category, style: request.categoryStyle)
+                Spacer()
+                Text(request.timeAgo)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Text(request.fullDescription)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+    }
+
+    private var requesterCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Requester")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            if isLoadingAssets && requesterPreview == nil {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let requesterPreview {
+                Text(requesterPreview.fullName)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                if let phone = requesterPreview.phone, !phone.isEmpty {
+                    Text(phone)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                }
+
+                if let bio = requesterPreview.quickBio, !bio.isEmpty {
+                    Text(bio)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(2)
+                }
+            } else {
+                Text("Requester details unavailable.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+    }
+
+    private var photosCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Requester Photos")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Spacer()
+                if !photoURLs.isEmpty {
+                    Text("\(photoURLs.count)")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(AppTheme.primaryBlue)
+                }
+            }
+
+            if isLoadingAssets && photoURLs.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if photoURLs.isEmpty {
+                Text("No photos were attached to this request.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(photoURLs, id: \.self) { url in
+                            AsyncImage(url: URL(string: url)) { phase in
+                                switch phase {
+                                case let .success(image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                case .failure:
+                                    ZStack {
+                                        Color.black.opacity(0.06)
+                                        Image(systemName: "photo")
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                case .empty:
+                                    ZStack {
+                                        Color.black.opacity(0.04)
+                                        ProgressView()
+                                    }
+                                @unknown default:
+                                    Color.black.opacity(0.04)
+                                }
+                            }
+                            .frame(width: 170, height: 120)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadiusLarge, style: .continuous))
+    }
+
+    private var mapCard: some View {
+        RouteMapView(
+            helperCoordinate: helperCoordinate,
+            requesterCoordinate: requesterCoordinate
+        )
+        .frame(height: 260)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
     private func markTaskCompleted() {
         guard !isCompletingTask else { return }
         isCompletingTask = true
@@ -977,6 +1365,22 @@ private struct ViewAcceptedRequestView: View {
             await MainActor.run {
                 isCompletingTask = false
             }
+        }
+    }
+
+    @MainActor
+    private func loadRequestAssets() async {
+        isLoadingAssets = true
+        defer { isLoadingAssets = false }
+        do {
+            async let previewTask = HelpRequestService.shared.fetchRequesterPreview(userId: request.requesterUserId)
+            async let photosTask = HelpRequestService.shared.fetchRequestPhotos(requestId: request.requestId)
+            let (preview, photos) = try await (previewTask, photosTask)
+            requesterPreview = preview
+            photoURLs = photos.map(\.photoUrl)
+        } catch {
+            requesterPreview = nil
+            photoURLs = []
         }
     }
 }

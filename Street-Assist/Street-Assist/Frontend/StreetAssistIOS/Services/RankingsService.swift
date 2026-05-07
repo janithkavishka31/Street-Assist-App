@@ -21,6 +21,7 @@ final class RankingsService {
         }
 
         try? await syncDailyCheckInFromActivity(mode: mode)
+        try? await refreshWeeklyLeaderboardSnapshot()
 
         let totalPoints: Int
         do {
@@ -167,6 +168,7 @@ final class RankingsService {
             points: 10,
             requestId: requestId
         )
+        try? await refreshWeeklyLeaderboardSnapshot()
     }
 
     private func randomGiftDiscount() -> Int {
@@ -208,20 +210,26 @@ final class RankingsService {
     }
 
     private func fetchOrCreateCurrentWeek() async throws -> LeaderboardWeek {
-        let weekStart = startOfCurrentWeekSunday(from: Date())
-        let weekStartDateString = Self.dateOnlyFormatter.string(from: weekStart)
+        let utcToday = Self.dateOnlyFormatter.string(from: Date())
+        let sixDaysAgo = Calendar(identifier: .gregorian).date(byAdding: .day, value: -6, to: Date()) ?? Date()
+        let lowerBound = Self.dateOnlyFormatter.string(from: sixDaysAgo)
 
-        let existing: [LeaderboardWeek] = try await SupabaseManager.shared.client
+        let existingInCurrentWindow: [LeaderboardWeek] = try await SupabaseManager.shared.client
             .from("leaderboard_weeks")
             .select()
-            .eq("week_start_date", value: weekStartDateString)
+            .lte("week_start_date", value: utcToday)
+            .gt("week_start_date", value: lowerBound)
+            .order("week_start_date", ascending: false)
             .limit(1)
             .execute()
             .value
 
-        if let week = existing.first {
+        if let week = existingInCurrentWindow.first {
             return week
         }
+
+        let weekStart = startOfCurrentWeekSundayUTC(from: Date())
+        let weekStartDateString = Self.dateOnlyFormatter.string(from: weekStart)
 
         let insertData: [String: AnyJSON] = [
             "week_start_date": .string(weekStartDateString)
@@ -259,7 +267,7 @@ final class RankingsService {
             .eq("leaderboard_week_id", value: weekId.uuidString)
             .eq("mode", value: mode.rawValue)
             .order("rank", ascending: true)
-            .limit(20)
+            .limit(10)
             .execute()
             .value
 
@@ -482,11 +490,14 @@ final class RankingsService {
         }
     }
 
-    private func startOfCurrentWeekSunday(from date: Date) -> Date {
-        let calendar = Calendar(identifier: .gregorian)
-        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
-        let isoWeekStart = calendar.date(from: components) ?? date
-        return calendar.date(byAdding: .day, value: -1, to: isoWeekStart) ?? isoWeekStart
+    private func startOfCurrentWeekSundayUTC(from date: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+
+        let shifted = calendar.date(byAdding: .day, value: 1, to: date) ?? date
+        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: shifted)
+        let mondayStart = calendar.date(from: components) ?? date
+        return calendar.date(byAdding: .day, value: -1, to: mondayStart) ?? mondayStart
     }
 
     private func ensureCheckInAndPoints(userId: UUID, mode: LeaderboardMode, points: Int, requestId: UUID) async throws {
@@ -536,6 +547,12 @@ final class RankingsService {
                 requestId: requestId
             )
         }
+    }
+
+    private func refreshWeeklyLeaderboardSnapshot() async throws {
+        _ = try await SupabaseManager.shared.client
+            .rpc("refresh_weekly_leaderboard_entries")
+            .execute()
     }
 }
 

@@ -1,8 +1,8 @@
 //
 //  AppIntent.swift
-//  street assist
+//  Street-Assist Pulse
 //
-//  Created by COBSCCOMP242P-050 on 2026-05-05.
+//  Created by COBSCCOMP242P-050 on 2026-05-07.
 //
 
 import WidgetKit

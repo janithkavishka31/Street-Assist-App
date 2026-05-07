@@ -7,19 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		713D27742FAA42DB00A00426 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 713D26002FAA3BF400A00426 /* WidgetKit.framework */; };
-		713D27752FAA42DB00A00426 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 713D26022FAA3BF400A00426 /* SwiftUI.framework */; };
-		713D27822FAA42DD00A00426 /* street assistExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 713D27732FAA42DB00A00426 /* street assistExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		71A1C0D02F90000100A49055 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 71A1C0CF2F90000100A49055 /* Supabase */; };
+		71BA898C2FACDF3700AE0107 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 713D26002FAA3BF400A00426 /* WidgetKit.framework */; };
+		71BA898D2FACDF3700AE0107 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 713D26022FAA3BF400A00426 /* SwiftUI.framework */; };
+		71BA899E2FACDF3800AE0107 /* Street-Assist PulseExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 71BA898B2FACDF3700AE0107 /* Street-Assist PulseExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		713D27802FAA42DD00A00426 /* PBXContainerItemProxy */ = {
+		71BA899C2FACDF3800AE0107 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 71910DF42F88B9BF00A49055 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 713D27722FAA42DB00A00426;
-			remoteInfo = "street assistExtension";
+			remoteGlobalIDString = 71BA898A2FACDF3700AE0107;
+			remoteInfo = "Street-Assist PulseExtension";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -30,7 +30,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				713D27822FAA42DD00A00426 /* street assistExtension.appex in Embed Foundation Extensions */,
+				71BA899E2FACDF3800AE0107 /* Street-Assist PulseExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -40,19 +40,19 @@
 /* Begin PBXFileReference section */
 		713D26002FAA3BF400A00426 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		713D26022FAA3BF400A00426 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
-		713D27732FAA42DB00A00426 /* street assistExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "street assistExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		71910DFC2F88B9BF00A49055 /* Street-Assist.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Street-Assist.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		71BA898B2FACDF3700AE0107 /* Street-Assist PulseExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Street-Assist PulseExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		71BA89A32FACDFE300AE0107 /* street assistExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "street assistExtension.entitlements"; sourceTree = "<group>"; };
+		71BA89BF2FACE00E00AE0107 /* Street-Assist PulseExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Street-Assist PulseExtension.entitlements"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		713D27832FAA42DD00A00426 /* Exceptions for "street assist" folder in "street assistExtension" target */ = {
+		71BA899F2FACDF3800AE0107 /* Exceptions for "Street-Assist Pulse" folder in "Street-Assist PulseExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				street_assistControl.swift,
-				street_assistLiveActivity.swift,
 			);
-			target = 713D27722FAA42DB00A00426 /* street assistExtension */;
+			target = 71BA898A2FACDF3700AE0107 /* Street-Assist PulseExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -64,9 +64,6 @@
 		};
 		713D27762FAA42DB00A00426 /* street assist */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				713D27832FAA42DD00A00426 /* Exceptions for "street assist" folder in "street assistExtension" target */,
-			);
 			path = "street assist";
 			sourceTree = "<group>";
 		};
@@ -75,23 +72,36 @@
 			path = "Street-Assist";
 			sourceTree = "<group>";
 		};
+		71BA898E2FACDF3700AE0107 /* Street-Assist Pulse */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				71BA899F2FACDF3800AE0107 /* Exceptions for "Street-Assist Pulse" folder in "Street-Assist PulseExtension" target */,
+			);
+			path = "Street-Assist Pulse";
+			sourceTree = "<group>";
+		};
+		71BA89AB2FACE00000AE0107 /* Street-Assist Pulse */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Street-Assist Pulse";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		713D27702FAA42DB00A00426 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				713D27752FAA42DB00A00426 /* SwiftUI.framework in Frameworks */,
-				713D27742FAA42DB00A00426 /* WidgetKit.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		71910DF92F88B9BF00A49055 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				71A1C0D02F90000100A49055 /* Supabase in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		71BA89882FACDF3700AE0107 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				71BA898D2FACDF3700AE0107 /* SwiftUI.framework in Frameworks */,
+				71BA898C2FACDF3700AE0107 /* WidgetKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -110,9 +120,13 @@
 		71910DF32F88B9BF00A49055 = {
 			isa = PBXGroup;
 			children = (
+				71BA89BF2FACE00E00AE0107 /* Street-Assist PulseExtension.entitlements */,
+				71BA89A32FACDFE300AE0107 /* street assistExtension.entitlements */,
 				71910DFE2F88B9BF00A49055 /* Street-Assist */,
 				713D26042FAA3BF400A00426 /* street assist */,
 				713D27762FAA42DB00A00426 /* street assist */,
+				71BA898E2FACDF3700AE0107 /* Street-Assist Pulse */,
+				71BA89AB2FACE00000AE0107 /* Street-Assist Pulse */,
 				713D25FF2FAA3BF400A00426 /* Frameworks */,
 				71910DFD2F88B9BF00A49055 /* Products */,
 			);
@@ -122,7 +136,7 @@
 			isa = PBXGroup;
 			children = (
 				71910DFC2F88B9BF00A49055 /* Street-Assist.app */,
-				713D27732FAA42DB00A00426 /* street assistExtension.appex */,
+				71BA898B2FACDF3700AE0107 /* Street-Assist PulseExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -130,28 +144,6 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		713D27722FAA42DB00A00426 /* street assistExtension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 713D27842FAA42DD00A00426 /* Build configuration list for PBXNativeTarget "street assistExtension" */;
-			buildPhases = (
-				713D276F2FAA42DB00A00426 /* Sources */,
-				713D27702FAA42DB00A00426 /* Frameworks */,
-				713D27712FAA42DB00A00426 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				713D27762FAA42DB00A00426 /* street assist */,
-			);
-			name = "street assistExtension";
-			packageProductDependencies = (
-			);
-			productName = "street assistExtension";
-			productReference = 713D27732FAA42DB00A00426 /* street assistExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 		71910DFB2F88B9BF00A49055 /* Street-Assist */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 71910E072F88B9C000A49055 /* Build configuration list for PBXNativeTarget "Street-Assist" */;
@@ -164,7 +156,7 @@
 			buildRules = (
 			);
 			dependencies = (
-				713D27812FAA42DD00A00426 /* PBXTargetDependency */,
+				71BA899D2FACDF3800AE0107 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				71910DFE2F88B9BF00A49055 /* Street-Assist */,
@@ -177,6 +169,28 @@
 			productReference = 71910DFC2F88B9BF00A49055 /* Street-Assist.app */;
 			productType = "com.apple.product-type.application";
 		};
+		71BA898A2FACDF3700AE0107 /* Street-Assist PulseExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 71BA89A02FACDF3800AE0107 /* Build configuration list for PBXNativeTarget "Street-Assist PulseExtension" */;
+			buildPhases = (
+				71BA89872FACDF3700AE0107 /* Sources */,
+				71BA89882FACDF3700AE0107 /* Frameworks */,
+				71BA89892FACDF3700AE0107 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				71BA898E2FACDF3700AE0107 /* Street-Assist Pulse */,
+			);
+			name = "Street-Assist PulseExtension";
+			packageProductDependencies = (
+			);
+			productName = "Street-Assist PulseExtension";
+			productReference = 71BA898B2FACDF3700AE0107 /* Street-Assist PulseExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -187,10 +201,10 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
-					713D27722FAA42DB00A00426 = {
+					71910DFB2F88B9BF00A49055 = {
 						CreatedOnToolsVersion = 26.2;
 					};
-					71910DFB2F88B9BF00A49055 = {
+					71BA898A2FACDF3700AE0107 = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -213,20 +227,20 @@
 			projectRoot = "";
 			targets = (
 				71910DFB2F88B9BF00A49055 /* Street-Assist */,
-				713D27722FAA42DB00A00426 /* street assistExtension */,
+				71BA898A2FACDF3700AE0107 /* Street-Assist PulseExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		713D27712FAA42DB00A00426 /* Resources */ = {
+		71910DFA2F88B9BF00A49055 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		71910DFA2F88B9BF00A49055 /* Resources */ = {
+		71BA89892FACDF3700AE0107 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -236,14 +250,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		713D276F2FAA42DB00A00426 /* Sources */ = {
+		71910DF82F88B9BF00A49055 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		71910DF82F88B9BF00A49055 /* Sources */ = {
+		71BA89872FACDF3700AE0107 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -253,79 +267,14 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		713D27812FAA42DD00A00426 /* PBXTargetDependency */ = {
+		71BA899D2FACDF3800AE0107 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 713D27722FAA42DB00A00426 /* street assistExtension */;
-			targetProxy = 713D27802FAA42DD00A00426 /* PBXContainerItemProxy */;
+			target = 71BA898A2FACDF3700AE0107 /* Street-Assist PulseExtension */;
+			targetProxy = 71BA899C2FACDF3800AE0107 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		713D27852FAA42DD00A00426 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "street assist/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "street assist";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "cw.Street-Assist.street-assist";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		713D27862FAA42DD00A00426 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "street assist/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "street assist";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "cw.Street-Assist.street-assist";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
 		71910E052F88B9C000A49055 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -445,13 +394,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Street-Assist/Street-Assist.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DJC54KNN4F;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Street Assist needs camera access to scan Help-Zone QR codes.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Street Assist uses Face ID for faster and secure login.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Street Assist uses your location to show nearby help requests.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -488,13 +440,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Street-Assist/Street-Assist.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DJC54KNN4F;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Street Assist needs camera access to scan Help-Zone QR codes.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Street Assist uses Face ID for faster and secure login.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Street Assist uses your location to show nearby help requests.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -526,18 +481,76 @@
 			};
 			name = Release;
 		};
+		71BA89A12FACDF3800AE0107 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = "Street-Assist PulseExtension.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DJC54KNN4F;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Street-Assist Pulse/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Street-Assist Pulse";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "cw.Street-Assist.Street-Assist-Pulse";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		71BA89A22FACDF3800AE0107 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = "Street-Assist PulseExtension.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DJC54KNN4F;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Street-Assist Pulse/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Street-Assist Pulse";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "cw.Street-Assist.Street-Assist-Pulse";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		713D27842FAA42DD00A00426 /* Build configuration list for PBXNativeTarget "street assistExtension" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				713D27852FAA42DD00A00426 /* Debug */,
-				713D27862FAA42DD00A00426 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		71910DF72F88B9BF00A49055 /* Build configuration list for PBXProject "Street-Assist" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -552,6 +565,15 @@
 			buildConfigurations = (
 				71910E082F88B9C000A49055 /* Debug */,
 				71910E092F88B9C000A49055 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		71BA89A02FACDF3800AE0107 /* Build configuration list for PBXNativeTarget "Street-Assist PulseExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				71BA89A12FACDF3800AE0107 /* Debug */,
+				71BA89A22FACDF3800AE0107 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

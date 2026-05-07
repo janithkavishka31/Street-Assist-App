@@ -1,8 +1,8 @@
 //
-//  street_assist.swift
-//  street assist
+//  Street_Assist_Pulse.swift
+//  Street-Assist Pulse
 //
-//  Created by COBSCCOMP242P-050 on 2026-05-05.
+//  Created by COBSCCOMP242P-050 on 2026-05-07.
 //
 
 import WidgetKit
@@ -57,7 +57,7 @@ struct SimpleEntry: TimelineEntry {
     let updatedAt: Date
 }
 
-struct street_assistEntryView : View {
+struct Street_Assist_PulseEntryView : View {
     var entry: Provider.Entry
 
     private var streakProgress: Double {
@@ -126,12 +126,12 @@ struct street_assistEntryView : View {
     }
 }
 
-struct street_assist: Widget {
-    let kind: String = "street_assist"
+struct Street_Assist_Pulse: Widget {
+    let kind: String = "Street_Assist_Pulse"
 
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: ConfigurationAppIntent.self, provider: Provider()) { entry in
-            street_assistEntryView(entry: entry)
+            Street_Assist_PulseEntryView(entry: entry)
         }
         .supportedFamilies([.systemSmall, .systemMedium])
     }
@@ -148,7 +148,7 @@ private enum WidgetDataStore {
 }
 
 #Preview(as: .systemSmall) {
-    street_assist()
+    Street_Assist_Pulse()
 } timeline: {
     SimpleEntry(
         date: .now,

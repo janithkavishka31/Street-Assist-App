@@ -651,3 +651,164 @@ alter table if exists public.help_request_acceptances
 
 -- Refresh PostgREST schema cache so new columns are discoverable immediately.
 notify pgrst, 'reload schema';
+
+-- ------------------------------------------------------------
+-- 12. LEADERBOARD REFRESH (FLOW FIX)
+-- ------------------------------------------------------------
+-- Uses ROW_NUMBER (not dense_rank) to satisfy unique rank constraint
+-- and uses payment_completed_at for requester weekly completion timing.
+create or replace function public.refresh_weekly_leaderboard_entries(p_week_start_date date default null)
+returns void language plpgsql as $$
+declare
+  v_week_start date := coalesce(
+    p_week_start_date,
+    (date_trunc('week', (now() at time zone 'utc') + interval '1 day') - interval '1 day')::date
+  );
+  v_week_end date := v_week_start + interval '7 days';
+  v_week_id uuid;
+begin
+  insert into public.leaderboard_weeks (week_start_date)
+  values (v_week_start)
+  on conflict (week_start_date) do nothing;
+
+  select lw.id into v_week_id
+  from public.leaderboard_weeks lw
+  where lw.week_start_date = v_week_start;
+
+  delete from public.leaderboard_entries le
+  where le.leaderboard_week_id = v_week_id
+    and le.mode in ('helper', 'requester');
+
+  with helper_completed as (
+    select
+      ha.helper_user_id as user_id,
+      count(*)::int as completed_count
+    from public.help_request_acceptances ha
+    where ha.completed_at >= v_week_start
+      and ha.completed_at < v_week_end
+    group by ha.helper_user_id
+  ),
+  helper_five_star as (
+    select
+      hr.rated_user_id as user_id,
+      count(*) filter (where hr.score = 5)::int as five_star_count,
+      avg(hr.score)::numeric as avg_rating
+    from public.help_request_ratings hr
+    where hr.created_at >= v_week_start
+      and hr.created_at < v_week_end
+    group by hr.rated_user_id
+  ),
+  helper_checkins as (
+    select
+      dc.user_id,
+      count(*)::int as checkin_count
+    from public.user_daily_checkins dc
+    where dc.mode = 'helper'
+      and dc.check_in_date >= v_week_start
+      and dc.check_in_date < v_week_end
+    group by dc.user_id
+  ),
+  helper_scores as (
+    select
+      u.id as user_id,
+      coalesce(hc.completed_count, 0) * 10
+      + coalesce(hf.five_star_count, 0) * 5
+      + coalesce(hk.checkin_count, 0) * 5 as points,
+      hf.avg_rating
+    from public.users u
+    left join helper_completed hc on hc.user_id = u.id
+    left join helper_five_star hf on hf.user_id = u.id
+    left join helper_checkins hk on hk.user_id = u.id
+  ),
+  helper_ranked as (
+    select
+      hs.user_id,
+      hs.points,
+      row_number() over (order by hs.points desc, hs.avg_rating desc nulls last, hs.user_id) as rank
+    from helper_scores hs
+    where hs.points > 0
+  )
+  insert into public.leaderboard_entries (id, leaderboard_week_id, mode, user_id, points, rank, title_label)
+  select
+    uuid_generate_v4(),
+    v_week_id,
+    'helper'::leaderboard_mode_enum,
+    hr.user_id,
+    hr.points,
+    hr.rank,
+    case hr.rank
+      when 1 then 'Platinum Helper'
+      when 2 then 'Elite Guardian'
+      when 3 then 'Steady Pulse'
+      else null
+    end
+  from helper_ranked hr;
+
+  with requester_completed as (
+    select
+      hr.requester_user_id as user_id,
+      count(*)::int as completed_count
+    from public.help_requests hr
+    where hr.status = 'completed'
+      and hr.payment_completed_at is not null
+      and hr.payment_completed_at >= v_week_start
+      and hr.payment_completed_at < v_week_end
+    group by hr.requester_user_id
+  ),
+  requester_five_star as (
+    select
+      rr.rated_user_id as user_id,
+      count(*) filter (where rr.score = 5)::int as five_star_count,
+      avg(rr.score)::numeric as avg_rating
+    from public.help_request_ratings rr
+    where rr.created_at >= v_week_start
+      and rr.created_at < v_week_end
+    group by rr.rated_user_id
+  ),
+  requester_checkins as (
+    select
+      dc.user_id,
+      count(*)::int as checkin_count
+    from public.user_daily_checkins dc
+    where dc.mode = 'requester'
+      and dc.check_in_date >= v_week_start
+      and dc.check_in_date < v_week_end
+    group by dc.user_id
+  ),
+  requester_scores as (
+    select
+      u.id as user_id,
+      coalesce(rc.completed_count, 0) * 10
+      + coalesce(rf.five_star_count, 0) * 5
+      + coalesce(rk.checkin_count, 0) * 5 as points,
+      rf.avg_rating
+    from public.users u
+    left join requester_completed rc on rc.user_id = u.id
+    left join requester_five_star rf on rf.user_id = u.id
+    left join requester_checkins rk on rk.user_id = u.id
+  ),
+  requester_ranked as (
+    select
+      rs.user_id,
+      rs.points,
+      row_number() over (order by rs.points desc, rs.avg_rating desc nulls last, rs.user_id) as rank
+    from requester_scores rs
+    where rs.points > 0
+  )
+  insert into public.leaderboard_entries (id, leaderboard_week_id, mode, user_id, points, rank, title_label)
+  select
+    uuid_generate_v4(),
+    v_week_id,
+    'requester'::leaderboard_mode_enum,
+    rr.user_id,
+    rr.points,
+    rr.rank,
+    case rr.rank
+      when 1 then 'Platinum Requester'
+      when 2 then 'Community Catalyst'
+      when 3 then 'Steady Supporter'
+      else null
+    end
+  from requester_ranked rr;
+end;
+$$;

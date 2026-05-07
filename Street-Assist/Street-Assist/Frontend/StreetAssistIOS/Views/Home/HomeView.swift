@@ -27,6 +27,10 @@ struct HomeView: View {
     @State private var requesterMessage: String?
     @State private var isShowingPaymentSheet = false
     @State private var paymentTask: HelpRequestService.RequesterActiveTask?
+    @State private var pendingRequesterRequest: HelpRequest?
+    @State private var isShowingPendingRequestSheet = false
+    @State private var homeScore: Double = 0
+    @State private var homeImpactAssists: Int = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,8 +108,11 @@ struct HomeView: View {
         .onAppear {
             locationManager.requestAccess()
             Task {
+                await loadHelperStatusFromServer()
                 await loadNearbyHelpersCount()
                 await loadActiveRequesterTask()
+                await loadPendingRequesterRequest()
+                await loadHomeStats()
             }
         }
         .onChange(of: session.isHelperEnabled) { _ in
@@ -115,7 +122,10 @@ struct HomeView: View {
             Task { await loadNearbyHelpersCount() }
         }
         .sheet(isPresented: $isShowingPaymentSheet, onDismiss: {
-            Task { await loadActiveRequesterTask() }
+            Task {
+                await loadActiveRequesterTask()
+                await loadPendingRequesterRequest()
+            }
         }) {
             if let paymentTask {
                 RequestPaymentSheetView(
@@ -123,6 +133,25 @@ struct HomeView: View {
                     isPresented: $isShowingPaymentSheet
                 )
             }
+        }
+        .sheet(isPresented: $isShowingPendingRequestSheet) {
+            if let pendingRequesterRequest {
+                if #available(iOS 16.4, *) {
+                    PendingRequestSheetView(request: pendingRequesterRequest)
+                        .presentationDetents([.height(470)])
+                        .presentationDragIndicator(.visible)
+                        .presentationCornerRadius(24)
+                } else if #available(iOS 16.0, *) {
+                    PendingRequestSheetView(request: pendingRequesterRequest)
+                        .presentationDetents([.medium])
+                        .presentationDragIndicator(.visible)
+                } else {
+                    PendingRequestSheetView(request: pendingRequesterRequest)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .streetAssistRequestSubmitted)) { _ in
+            Task { await loadPendingRequesterRequest() }
         }
     }
 
@@ -199,12 +228,16 @@ struct HomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Button {
-                    isShowingHelpSheet = true
+                    if pendingRequesterRequest != nil {
+                        isShowingPendingRequestSheet = true
+                    } else {
+                        isShowingHelpSheet = true
+                    }
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "location.fill")
+                        Image(systemName: pendingRequesterRequest == nil ? "location.fill" : "clock.fill")
                             .font(.system(size: 16, weight: .semibold))
-                        Text("Request Help")
+                        Text(pendingRequesterRequest == nil ? "Request Help" : "Pending Request")
                             .font(.system(size: 16, weight: .bold))
                     }
                     .foregroundStyle(AppTheme.primaryBlueDark)
@@ -355,8 +388,8 @@ struct HomeView: View {
 
     private var statsRow: some View {
         HStack(spacing: 12) {
-            statCard(title: "YOUR SCORE", value: "4.9", suffix: "/5.0")
-            statCard(title: "IMPACT", value: "128", suffix: "Assists")
+            statCard(title: "YOUR SCORE", value: String(format: "%.1f", homeScore), suffix: "/5.0")
+            statCard(title: "IMPACT", value: "\(homeImpactAssists)", suffix: "Assists")
         }
     }
 
@@ -407,6 +440,12 @@ struct HomeView: View {
 
     @MainActor
     private func updateHelperStatus() async {
+        do {
+            try await HelpRequestService.shared.updateCurrentUserHelperEnabled(session.isHelperEnabled)
+        } catch {
+            print("Error syncing helper setting: \(error.localizedDescription)")
+        }
+
         guard let location = locationManager.location else {
             if session.isHelperEnabled {
                 await loadNearbyHelpersCount()
@@ -446,14 +485,43 @@ struct HomeView: View {
     }
 
     @MainActor
+    private func loadHelperStatusFromServer() async {
+        do {
+            if let settings = try await HelpRequestService.shared.fetchCurrentUserSettings() {
+                session.isHelperEnabled = settings.isHelperEnabled
+            }
+        } catch {
+            print("Error loading helper setting: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
     private func loadActiveRequesterTask() async {
         isLoadingActiveTask = true
         defer { isLoadingActiveTask = false }
         do {
-            activeRequesterTask = try await HelpRequestService.shared.fetchActiveRequesterTask()
+            let task = try await HelpRequestService.shared.fetchActiveRequesterTask()
+            activeRequesterTask = task
+
+            if let task {
+                await LocalNotificationService.shared.notifyRequesterHelperAcceptedIfNeeded(
+                    requestId: task.request.id,
+                    helperName: task.helperName,
+                    categoryTitle: task.request.serviceTitle
+                )
+            }
         } catch {
             activeRequesterTask = nil
             requesterMessage = "Unable to load active task: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    private func loadPendingRequesterRequest() async {
+        do {
+            pendingRequesterRequest = try await HelpRequestService.shared.fetchLatestPendingRequestForCurrentRequester()
+        } catch {
+            pendingRequesterRequest = nil
         }
     }
 
@@ -472,11 +540,142 @@ struct HomeView: View {
                         requesterMessage = "Marked completed. Waiting for helper completion to unlock payment."
                     }
                 }
+                await loadPendingRequesterRequest()
             } catch {
                 await MainActor.run {
                     requesterMessage = "Unable to mark completion: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func loadHomeStats() async {
+        do {
+            let stats = try await HelpRequestService.shared.fetchHomeHelperStats()
+            homeScore = stats.averageScore
+            homeImpactAssists = stats.impactAssists
+        } catch {
+            print("Error loading home helper stats: \(error.localizedDescription)")
+            homeScore = 0
+            homeImpactAssists = 0
+        }
+    }
+}
+
+private struct PendingRequestSheetView: View {
+    let request: HelpRequest
+    @Environment(\.dismiss) private var dismiss
+    @State private var photoURLs: [String] = []
+    @State private var isLoadingPhotos = false
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Pending Request")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(AppTheme.textSecondary)
+                            .padding(10)
+                            .background(Color.black.opacity(0.06))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text(request.serviceTitle)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(AppTheme.primaryBlue)
+
+                Text(request.description)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Photos")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppTheme.textSecondary)
+
+                    if isLoadingPhotos {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if photoURLs.isEmpty {
+                        Text("No photos attached.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.textSecondary)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(photoURLs, id: \.self) { url in
+                                    AsyncImage(url: URL(string: url)) { phase in
+                                        switch phase {
+                                        case let .success(image):
+                                            image.resizable().scaledToFill()
+                                        case .empty:
+                                            ZStack {
+                                                Color.black.opacity(0.04)
+                                                ProgressView()
+                                            }
+                                        default:
+                                            ZStack {
+                                                Color.black.opacity(0.06)
+                                                Image(systemName: "photo")
+                                                    .foregroundStyle(AppTheme.textSecondary)
+                                            }
+                                        }
+                                    }
+                                    .frame(width: 112, height: 82)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HStack {
+                    Text("Scope")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                    Text(request.scope == .helpZoneOnly ? "Zone Only" : "Zone + Global")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+
+                HStack {
+                    Text("Status")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppTheme.textSecondary)
+                    Spacer()
+                    Text(request.status == .accepted ? "Accepted (in progress)" : "Waiting for helper")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(request.status == .accepted ? AppTheme.categoryGreen : AppTheme.categoryOrange)
+                }
+            }
+            .padding(20)
+        }
+        .background(AppTheme.screenBackground)
+        .task {
+            await loadPhotos()
+        }
+    }
+
+    @MainActor
+    private func loadPhotos() async {
+        isLoadingPhotos = true
+        defer { isLoadingPhotos = false }
+        do {
+            let photos = try await HelpRequestService.shared.fetchRequestPhotos(requestId: request.id)
+            photoURLs = photos.map(\.photoUrl)
+        } catch {
+            photoURLs = []
         }
     }
 }

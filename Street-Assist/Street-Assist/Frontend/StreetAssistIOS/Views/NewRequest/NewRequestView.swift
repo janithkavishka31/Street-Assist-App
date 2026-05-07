@@ -20,11 +20,14 @@ struct NewRequestView: View {
     @State private var isSubmitting = false
     @State private var showSubmitError = false
     @State private var submitErrorMessage: String? = nil
-    
+
     @State private var requestScope: RequestScope = .helpZoneAndGlobal
     @State private var joinedZones: [HelpZone] = []
     @State private var selectedZone: HelpZone? = nil
     @State private var isLoadingZones = false
+    @State private var selectedAddressText: String = "2425 Mission St, San Francisco"
+    @State private var shouldSnapToCurrentLocation = false
+    @StateObject private var locationManager = HomeLocationManager()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -72,7 +75,13 @@ struct NewRequestView: View {
             Task { await loadPickedImages(from: newItems) }
         }
         .task {
+            locationManager.requestAccess()
             await loadJoinedZones()
+        }
+        .onChange(of: locationManager.location) { location in
+            guard shouldSnapToCurrentLocation, let coordinate = location?.coordinate else { return }
+            updateMapToSelectedCoordinate(coordinate)
+            shouldSnapToCurrentLocation = false
         }
     }
 
@@ -284,7 +293,7 @@ struct NewRequestView: View {
                 Spacer()
 
                 Button {
-                    // Wire location fetch later
+                    snapToCurrentLocation()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "location.circle")
@@ -326,7 +335,7 @@ struct NewRequestView: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(AppTheme.textSecondary)
 
-                Text("2425 Mission St, San Francisco")
+                Text(selectedAddressText)
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(AppTheme.textPrimary)
                     .lineLimit(2)
@@ -405,6 +414,7 @@ struct NewRequestView: View {
                 zoneId: requestScope == .helpZoneOnly ? selectedZone?.id : nil,
                 photos: selectedImages
             )
+            NotificationCenter.default.post(name: .streetAssistRequestSubmitted, object: nil)
             dismiss()
         } catch {
             submitErrorMessage = error.localizedDescription
@@ -452,6 +462,50 @@ struct NewRequestView: View {
         }
         pickerItems = []
     }
+
+    private func snapToCurrentLocation() {
+        shouldSnapToCurrentLocation = true
+        locationManager.requestAccess()
+
+        if let coordinate = locationManager.location?.coordinate {
+            updateMapToSelectedCoordinate(coordinate)
+            shouldSnapToCurrentLocation = false
+        }
+    }
+
+    private func updateMapToSelectedCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        region.center = coordinate
+        region.span = MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+
+        Task {
+            let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            let geocoder = CLGeocoder()
+            do {
+                let placemarks = try await geocoder.reverseGeocodeLocation(location)
+                let place = placemarks.first
+                let formatted = [
+                    place?.subThoroughfare,
+                    place?.thoroughfare,
+                    place?.locality
+                ]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+
+                await MainActor.run {
+                    selectedAddressText = formatted.isEmpty ? "Current location selected" : formatted
+                }
+            } catch {
+                await MainActor.run {
+                    selectedAddressText = "Current location selected"
+                }
+            }
+        }
+    }
+}
+
+extension Notification.Name {
+    static let streetAssistRequestSubmitted = Notification.Name("streetAssistRequestSubmitted")
 }
 
 // MARK: - Helper Types

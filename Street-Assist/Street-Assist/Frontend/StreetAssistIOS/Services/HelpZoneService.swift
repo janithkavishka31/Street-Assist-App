@@ -6,6 +6,14 @@ final class HelpZoneService {
     static let shared = HelpZoneService()
     private init() {}
 
+    struct ZoneMemberProfile: Identifiable {
+        let id: UUID
+        let fullName: String
+        let role: ZoneRole
+        let joinedAt: Date
+        let isHelperEnabled: Bool
+    }
+
     func generateJoinCode(prefix: String = "ZONE") -> String {
         let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         let suffix = String((0..<5).map { _ in letters.randomElement()! })
@@ -149,7 +157,75 @@ final class HelpZoneService {
         return zones
     }
 
-       
+    func fetchJoinedZoneIDsForCurrentUser() async throws -> Set<UUID> {
+        guard let userId = SupabaseManager.shared.client.auth.currentUser?.id
+            ?? SupabaseManager.shared.client.auth.currentSession?.user.id else {
+            return []
+        }
+
+        let memberships: [ZoneMembership] = try await SupabaseManager.shared.client
+            .from("zone_memberships")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .eq("status", value: ZoneMemberStatus.active.rawValue)
+            .execute()
+            .value
+
+        return Set(memberships.map(\.zoneId))
+    }
+
+    func fetchZoneMembers(zoneId: UUID) async throws -> [ZoneMemberProfile] {
+        struct UserNameRow: Decodable {
+            let id: UUID
+            let fullName: String
+
+            enum CodingKeys: String, CodingKey {
+                case id
+                case fullName = "full_name"
+            }
+        }
+
+        let memberships: [ZoneMembership] = try await SupabaseManager.shared.client
+            .from("zone_memberships")
+            .select()
+            .eq("zone_id", value: zoneId.uuidString)
+            .eq("status", value: ZoneMemberStatus.active.rawValue)
+            .order("joined_at", ascending: true)
+            .execute()
+            .value
+
+        let userIDs = memberships.map(\.userId)
+        guard !userIDs.isEmpty else {
+            return []
+        }
+
+        let users: [UserNameRow] = try await SupabaseManager.shared.client
+            .from("users")
+            .select("id, full_name")
+            .in("id", values: userIDs.map(\.uuidString))
+            .execute()
+            .value
+
+        let settings: [UserSettings] = try await SupabaseManager.shared.client
+            .from("user_settings")
+            .select()
+            .in("user_id", values: userIDs.map(\.uuidString))
+            .execute()
+            .value
+
+        let nameByUserID = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0.fullName) })
+        let helperEnabledByUserID = Dictionary(uniqueKeysWithValues: settings.map { ($0.userId, $0.isHelperEnabled) })
+
+        return memberships.map { membership in
+            ZoneMemberProfile(
+                id: membership.userId,
+                fullName: nameByUserID[membership.userId] ?? "Member",
+                role: membership.role,
+                joinedAt: membership.joinedAt,
+                isHelperEnabled: helperEnabledByUserID[membership.userId] ?? false
+            )
+        }
+    }
 
     func fetchZoneOnlyRequests(zoneId: UUID) async throws -> [HelpRequest] {
         let response: [HelpRequest] = try await SupabaseManager.shared.client

@@ -10,7 +10,7 @@ struct NearbyHelpersMapView: View {
     @State private var isLoading = false
     @State private var mapRegion: MKCoordinateRegion
 
-    private let nearbyThresholdMeters: CLLocationDistance = 5000
+    private let nearbyThresholdMeters: CLLocationDistance = 10_000
 
     init(helperCoordinate: CLLocationCoordinate2D) {
         self.helperCoordinate = helperCoordinate
@@ -22,21 +22,11 @@ struct NearbyHelpersMapView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Map(coordinateRegion: $mapRegion, annotationItems: nearbyHelpers) { helper in
-                MapAnnotation(coordinate: helper.coordinate) {
-                    VStack(spacing: 0) {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(AppTheme.primaryBlue)
-                            .background(Circle().fill(Color.white).frame(width: 40, height: 40))
-
-                        Image(systemName: "triangle.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(AppTheme.primaryBlue)
-                            .offset(y: -4)
-                    }
-                }
-            }
+            NearbyHelpersRadiusMapRepresentable(
+                userCoordinate: helperCoordinate,
+                nearbyHelpers: nearbyHelpers,
+                radiusMeters: nearbyThresholdMeters
+            )
             .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 12) {
@@ -92,8 +82,96 @@ struct NearbyHelpersMapView: View {
                 longitude: helperCoordinate.longitude,
                 radiusMeters: nearbyThresholdMeters
             )
+            mapRegion = MKCoordinateRegion(
+                center: helperCoordinate,
+                latitudinalMeters: nearbyThresholdMeters * 2.4,
+                longitudinalMeters: nearbyThresholdMeters * 2.4
+            )
         } catch {
             print("Error loading nearby helpers: \(error.localizedDescription)")
+        }
+    }
+}
+
+private struct NearbyHelpersRadiusMapRepresentable: UIViewRepresentable {
+    let userCoordinate: CLLocationCoordinate2D
+    let nearbyHelpers: [HelperLocation]
+    let radiusMeters: CLLocationDistance
+
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        mapView.showsCompass = false
+        mapView.showsScale = false
+        mapView.isPitchEnabled = false
+        mapView.isRotateEnabled = false
+        return mapView
+    }
+
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        mapView.removeAnnotations(mapView.annotations)
+        mapView.removeOverlays(mapView.overlays)
+
+        let userPin = MKPointAnnotation()
+        userPin.title = "You"
+        userPin.coordinate = userCoordinate
+        mapView.addAnnotation(userPin)
+
+        let helperPins: [MKPointAnnotation] = nearbyHelpers.map { helper in
+            let pin = MKPointAnnotation()
+            pin.title = "Helper"
+            pin.coordinate = helper.coordinate
+            return pin
+        }
+        mapView.addAnnotations(helperPins)
+
+        let radiusCircle = MKCircle(center: userCoordinate, radius: radiusMeters)
+        mapView.addOverlay(radiusCircle)
+
+        let visibleRegion = MKCoordinateRegion(
+            center: userCoordinate,
+            latitudinalMeters: radiusMeters * 2.4,
+            longitudinalMeters: radiusMeters * 2.4
+        )
+        mapView.setRegion(visibleRegion, animated: true)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate {
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            guard !(annotation is MKUserLocation) else { return nil }
+
+            let identifier = "NearbyHelpersPin"
+            let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
+                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+
+            view.annotation = annotation
+            view.canShowCallout = true
+
+            if annotation.title ?? "" == "You" {
+                view.markerTintColor = .systemRed
+                view.glyphImage = UIImage(systemName: "location.fill")
+            } else {
+                view.markerTintColor = UIColor(AppTheme.primaryBlue)
+                view.glyphImage = UIImage(systemName: "person.fill")
+            }
+
+            return view
+        }
+
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            guard let circle = overlay as? MKCircle else {
+                return MKOverlayRenderer(overlay: overlay)
+            }
+
+            let renderer = MKCircleRenderer(circle: circle)
+            renderer.strokeColor = UIColor.systemRed.withAlphaComponent(0.8)
+            renderer.fillColor = UIColor.systemRed.withAlphaComponent(0.10)
+            renderer.lineWidth = 2
+            return renderer
         }
     }
 }

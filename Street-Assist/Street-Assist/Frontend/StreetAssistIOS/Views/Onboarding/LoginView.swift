@@ -8,8 +8,11 @@ struct LoginView: View {
     @State private var password: String = ""
     @State private var isSubmitting: Bool = false
     @State private var errorMessage: String?
+    @State private var canUseFaceID = false
+    @State private var hasSavedCredentials = false
 
     private let authService = SupabaseAuthService()
+    private let biometricService = BiometricAuthService.shared
 
     var body: some View {
         ZStack {
@@ -76,9 +79,12 @@ struct LoginView: View {
 
                     Task {
                         do {
-                            try await authService.signInEmail(email: emailOrPhone, password: password)
+                            let trimmedEmail = emailOrPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+                            try await authService.signInEmail(email: trimmedEmail, password: password)
+                            try? biometricService.saveCredentials(email: trimmedEmail, password: password)
                             await MainActor.run {
                                 isSubmitting = false
+                                hasSavedCredentials = biometricService.hasStoredCredentials()
                                 onLogin()
                             }
                         } catch {
@@ -108,6 +114,31 @@ struct LoginView: View {
                     .disabled(isSubmitting)
                     .opacity(isSubmitting ? 0.7 : 1)
                 .padding(.top, 8)
+
+                if canUseFaceID {
+                    Button {
+                        loginWithFaceID()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "faceid")
+                                .font(.system(size: 20, weight: .bold))
+                            Text(hasSavedCredentials ? "Login with Face ID" : "Login once to enable Face ID")
+                                .font(.system(size: 16, weight: .bold))
+                        }
+                        .foregroundStyle(hasSavedCredentials ? AppTheme.primaryBlue : AppTheme.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(AppTheme.cardBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(AppTheme.border, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSubmitting || !hasSavedCredentials)
+                    .opacity((isSubmitting || !hasSavedCredentials) ? 0.7 : 1)
+                }
 
                 connectWithDivider
                     .padding(.top, 12)
@@ -143,6 +174,10 @@ struct LoginView: View {
                 .padding(.bottom, 10)
             }
             .padding(.horizontal, 22)
+        }
+        .onAppear {
+            canUseFaceID = biometricService.canUseBiometrics()
+            hasSavedCredentials = biometricService.hasStoredCredentials()
         }
     }
 
@@ -254,6 +289,30 @@ struct LoginView: View {
             .shadow(color: AppTheme.shadow, radius: 14, x: 0, y: 10)
         }
         .buttonStyle(.plain)
+    }
+
+    private func loginWithFaceID() {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let credentials = try await biometricService.loadCredentialsWithBiometrics(
+                    reason: "Use Face ID to login to Street-Assist."
+                )
+                try await authService.signInEmail(email: credentials.email, password: credentials.password)
+                await MainActor.run {
+                    isSubmitting = false
+                    onLogin()
+                }
+            } catch {
+                await MainActor.run {
+                    isSubmitting = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }
 

@@ -5,7 +5,7 @@ import WidgetKit
 
 enum WidgetSyncService {
     // NOTE: Set this same App Group on both app + widget targets in Signing & Capabilities.
-    static let appGroupSuite = "group.com.streetassist.shared"
+    static let appGroupSuite = "group.streetassist"
 
     private enum Key {
         static let totalPoints = "widget.total_points"
@@ -24,6 +24,7 @@ enum WidgetSyncService {
 
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "street_assist")
+        WidgetCenter.shared.reloadTimelines(ofKind: "Street_Assist_Pulse")
         #endif
     }
 }
