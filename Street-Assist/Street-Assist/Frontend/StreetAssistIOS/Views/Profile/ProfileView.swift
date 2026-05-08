@@ -1,6 +1,10 @@
 import SwiftUI
+import AVFoundation
+import AudioToolbox
 
 struct ProfileView: View {
+    private static let speechSynthesizer = AVSpeechSynthesizer()
+
     @EnvironmentObject private var session: AppSession
 
     @State private var profile: HelpRequestService.UserProfileSummary?
@@ -10,12 +14,16 @@ struct ProfileView: View {
     @State private var errorMessage: String?
     @State private var successMessage: String?
     @State private var hasLoadedForm = false
+    @State private var hasFinishedInitialLoad = false
 
     @State private var fullName: String = ""
     @State private var phone: String = ""
     @State private var quickBio: String = ""
     @State private var isHelperEnabled: Bool = false
     @State private var defaultScope: RequestScope = .helpZoneAndGlobal
+    @State private var isScreenReaderEnabled: Bool = false
+    @State private var isSoundEffectsEnabled: Bool = true
+    @State private var isDynamicTextEnabled: Bool = true
     @State private var selectedSkillIDs: Set<Int> = []
 
     private let authService = SupabaseAuthService()
@@ -101,6 +109,28 @@ struct ProfileView: View {
         .onChange(of: isHelperEnabled) { newValue in
             session.isHelperEnabled = newValue
         }
+        .onChange(of: isScreenReaderEnabled) { newValue in
+            guard hasFinishedInitialLoad else { return }
+            if newValue {
+                speakIfEnabled("Screen reader enabled")
+            } else if isSoundEffectsEnabled {
+                playTapSound()
+            }
+        }
+        .onChange(of: isSoundEffectsEnabled) { newValue in
+            guard hasFinishedInitialLoad else { return }
+            if newValue {
+                playTapSound()
+            }
+            speakIfEnabled(newValue ? "Sound effects enabled" : "Sound effects disabled")
+        }
+        .onChange(of: isDynamicTextEnabled) { _ in
+            guard hasFinishedInitialLoad else { return }
+            if isSoundEffectsEnabled {
+                playTapSound()
+            }
+            speakIfEnabled(isDynamicTextEnabled ? "Dynamic text enabled" : "Dynamic text disabled")
+        }
     }
 
     @MainActor
@@ -132,6 +162,7 @@ struct ProfileView: View {
             if !hasLoadedForm {
                 applyProfileToForm(summary)
                 hasLoadedForm = true
+                hasFinishedInitialLoad = true
             }
         } catch {
             errorMessage = "Unable to load profile: \(error.localizedDescription)"
@@ -259,6 +290,43 @@ struct ProfileView: View {
                 Text("Zone + Global").tag(RequestScope.helpZoneAndGlobal)
             }
             .pickerStyle(.segmented)
+
+            Divider()
+                .padding(.vertical, 4)
+
+            Text("Accessibility")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            HStack {
+                Text("Screen Reader")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+                Toggle("", isOn: $isScreenReaderEnabled)
+                    .labelsHidden()
+                    .tint(AppTheme.primaryBlue)
+            }
+
+            HStack {
+                Text("Sound Effects")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+                Toggle("", isOn: $isSoundEffectsEnabled)
+                    .labelsHidden()
+                    .tint(AppTheme.primaryBlue)
+            }
+
+            HStack {
+                Text("Dynamic Text")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                Spacer()
+                Toggle("", isOn: $isDynamicTextEnabled)
+                    .labelsHidden()
+                    .tint(AppTheme.primaryBlue)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -351,6 +419,9 @@ struct ProfileView: View {
         quickBio = summary.user.quickBio ?? ""
         isHelperEnabled = summary.settings?.isHelperEnabled ?? false
         defaultScope = summary.settings?.defaultScope ?? .helpZoneAndGlobal
+        isScreenReaderEnabled = summary.settings?.isScreenReaderEnabled ?? false
+        isSoundEffectsEnabled = summary.settings?.isSoundEffectsEnabled ?? true
+        isDynamicTextEnabled = summary.settings?.isDynamicTextEnabled ?? true
         selectedSkillIDs = summary.selectedSkillIDs
     }
 
@@ -377,6 +448,9 @@ struct ProfileView: View {
                 quickBio: quickBio,
                 isHelperEnabled: isHelperEnabled,
                 defaultScope: defaultScope,
+                isScreenReaderEnabled: isScreenReaderEnabled,
+                isSoundEffectsEnabled: isSoundEffectsEnabled,
+                isDynamicTextEnabled: isDynamicTextEnabled,
                 selectedSkillIDs: selectedSkillIDs
             )
             try await HelpRequestService.shared.updateCurrentUserProfile(payload: payload)
@@ -385,9 +459,27 @@ struct ProfileView: View {
                 applyProfileToForm(profile)
             }
             successMessage = "Profile updated successfully."
+            if isSoundEffectsEnabled {
+                playTapSound()
+            }
+            speakIfEnabled("Profile updated successfully")
         } catch {
             errorMessage = "Unable to save profile: \(error.localizedDescription)"
         }
+    }
+
+    private func speakIfEnabled(_ text: String) {
+        guard isScreenReaderEnabled else { return }
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.rate = 0.5
+        utterance.pitchMultiplier = 1.0
+        utterance.volume = 1.0
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        Self.speechSynthesizer.speak(utterance)
+    }
+
+    private func playTapSound() {
+        AudioServicesPlaySystemSound(1104)
     }
 }
 

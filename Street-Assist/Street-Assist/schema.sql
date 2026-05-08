@@ -124,6 +124,9 @@ create table public.user_settings (
   user_id           uuid                not null primary key references public.users(id) on delete cascade,
   is_helper_enabled boolean             not null default false,
   default_scope     request_scope_enum  not null default 'help_zone_and_global',
+  is_screen_reader_enabled boolean      not null default false,
+  is_sound_effects_enabled boolean      not null default true,
+  is_dynamic_text_enabled boolean       not null default true,
   updated_at        timestamptz         not null default now()
 );
 

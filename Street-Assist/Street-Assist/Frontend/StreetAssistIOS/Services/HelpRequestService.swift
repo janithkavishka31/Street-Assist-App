@@ -43,6 +43,9 @@ class HelpRequestService {
         let quickBio: String?
         let isHelperEnabled: Bool
         let defaultScope: RequestScope
+        let isScreenReaderEnabled: Bool
+        let isSoundEffectsEnabled: Bool
+        let isDynamicTextEnabled: Bool
         let selectedSkillIDs: Set<Int>
     }
 
@@ -846,6 +849,9 @@ class HelpRequestService {
             "user_id": .string(userId.uuidString),
             "is_helper_enabled": .bool(payload.isHelperEnabled),
             "default_scope": .string(payload.defaultScope.rawValue),
+            "is_screen_reader_enabled": .bool(payload.isScreenReaderEnabled),
+            "is_sound_effects_enabled": .bool(payload.isSoundEffectsEnabled),
+            "is_dynamic_text_enabled": .bool(payload.isDynamicTextEnabled),
             "updated_at": .string(Date().ISO8601Format())
         ]
 
